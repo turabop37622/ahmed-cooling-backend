@@ -108,56 +108,12 @@ async function startServer() {
     console.log('✅ Models loaded successfully');
 
     // ============================================
-    // AUTH ROUTES
+    // AUTH ROUTES (USING SEPARATE FILE)
     // ============================================
+    const authRoutes = require('./routes/auth');
+    app.use('/api/auth', authRoutes);
 
-    app.post('/api/auth/register', async (req, res) => {
-      try {
-        const { name, email, password, phone } = req.body;
-
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
-          return res.status(400).json({ success: false, error: 'User already exists' });
-        }
-
-        const user = new User({ name, email, password, phone, role: 'customer' });
-        await user.save();
-
-        const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '30d' });
-
-        res.status(201).json({
-          success: true,
-          token,
-          user: user.toJSON()
-        });
-
-      } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-      }
-    });
-
-    app.post('/api/auth/login', async (req, res) => {
-      try {
-        const { email, password } = req.body;
-
-        const user = await User.findOne({ email });
-        if (!user) {
-          return res.status(401).json({ success: false, error: 'Invalid credentials' });
-        }
-
-        const isValid = await user.comparePassword(password);
-        if (!isValid) {
-          return res.status(401).json({ success: false, error: 'Invalid credentials' });
-        }
-
-        const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '30d' });
-
-        res.json({ success: true, token, user: user.toJSON() });
-
-      } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-      }
-    });
+    console.log('✅ Auth routes loaded successfully');
 
     // ============================================
     // SERVICE ROUTES

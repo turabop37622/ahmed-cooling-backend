@@ -2,9 +2,9 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
-  name: {
+  fullName: {
     type: String,
-    required: [true, 'Name is required'],
+    required: [true, 'Full name is required'],
     trim: true
   },
   email: {
@@ -53,6 +53,12 @@ const userSchema = new mongoose.Schema({
     default: false
   },
   verificationToken: String,
+  otp: {
+    type: String
+  },
+  otpExpires: {
+    type: Date
+  },
   resetPasswordToken: String,
   resetPasswordExpires: Date,
 
@@ -70,19 +76,10 @@ const userSchema = new mongoose.Schema({
   googleProfile: {
     displayName: String,
     picture: String
-  },
-  // ===================================================
-
-  createdAt: {
-    type: Date,
-    default: Date.now
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now
   }
+  // ===================================================
 }, {
-  timestamps: true
+  timestamps: true // This automatically adds createdAt and updatedAt
 });
 
 // Hash password before saving (only if password is modified)
@@ -112,6 +109,8 @@ userSchema.methods.toJSON = function() {
   delete obj.verificationToken;
   delete obj.resetPasswordToken;
   delete obj.resetPasswordExpires;
+  delete obj.otp;
+  delete obj.otpExpires;
   return obj;
 };
 
