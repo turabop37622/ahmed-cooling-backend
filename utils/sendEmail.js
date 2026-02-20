@@ -10,7 +10,7 @@ const sendEmail = async (to, otp) => {
       {
         sender: {
           name: "Ahmed Cooling Workshop",
-          email: "a2de6b001@smtp-brevo.com"
+          email: "turabop37622@gmail.com"
         },
         to: [{ email: to }],
         subject: 'Email Verification OTP',
