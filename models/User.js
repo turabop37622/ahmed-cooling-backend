@@ -18,7 +18,7 @@ const userSchema = new mongoose.Schema({
   password: {
     type: String,
     minlength: [6, 'Password must be at least 6 characters'],
-    default: null // Google users won't have password
+    default: null
   },
   phone: {
     type: String,
@@ -66,7 +66,7 @@ const userSchema = new mongoose.Schema({
   googleId: {
     type: String,
     unique: true,
-    sparse: true // Allow null values for non-Google users
+    sparse: true
   },
   authProvider: {
     type: String,
@@ -79,12 +79,11 @@ const userSchema = new mongoose.Schema({
   }
   // ===================================================
 }, {
-  timestamps: true // This automatically adds createdAt and updatedAt
+  timestamps: true
 });
 
 // Hash password before saving (only if password is modified)
 userSchema.pre('save', async function(next) {
-  // Skip if no password or password not modified
   if (!this.password || !this.isModified('password')) return next();
   
   try {
@@ -98,19 +97,30 @@ userSchema.pre('save', async function(next) {
 
 // Compare password method
 userSchema.methods.comparePassword = async function(candidatePassword) {
-  if (!this.password) return false; // Google users don't have password
+  if (!this.password) return false;
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Remove sensitive information when converting to JSON
+// ✅ Normal response ke liye - OTP fields hidden
 userSchema.methods.toJSON = function() {
   const obj = this.toObject();
   delete obj.password;
   delete obj.verificationToken;
   delete obj.resetPasswordToken;
   delete obj.resetPasswordExpires;
-  delete obj.otp;
-  delete obj.otpExpires;
+  delete obj.otp;        // ✅ Normal response mein hidden rahega
+  delete obj.otpExpires; // ✅ Normal response mein hidden rahega
+  return obj;
+};
+
+// ✅ Jab OTP include karna ho tab yeh method use karo
+userSchema.methods.toJSONWithOTP = function() {
+  const obj = this.toObject();
+  delete obj.password;
+  delete obj.verificationToken;
+  delete obj.resetPasswordToken;
+  delete obj.resetPasswordExpires;
+  // OTP fields DELETE NAHI ho rahe ✅
   return obj;
 };
 
