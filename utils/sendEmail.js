@@ -6,7 +6,7 @@ const sendEmail = async (to, otp) => {
   console.log("📧 EMAIL_PASS exists:", !!process.env.EMAIL_PASS);
 
   const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
+    host: 'smtp-relay.brevo.com',
     port: 587,
     secure: false,
     auth: {
