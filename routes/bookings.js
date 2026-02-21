@@ -9,7 +9,7 @@ const Notification = require('../models/Notification');
 const { body, validationResult } = require('express-validator');
 
 // ============================================
-// AUTH MIDDLEWARE - Inline (no external file needed)
+// AUTH MIDDLEWARE
 // ============================================
 const JWT_SECRET = process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token';
 
@@ -30,38 +30,27 @@ const auth = (req, res, next) => {
 };
 
 // ============================================
-// PHONE VALIDATION FUNCTION - International
+// PHONE VALIDATION FUNCTION
 // ============================================
 const validateInternationalPhone = (phone) => {
-  // Sirf numbers aur + rakhein
   const cleanPhone = phone.replace(/[^\d+]/g, '');
-  
-  // International phone number pattern - More flexible
-  // + se shuru, phir minimum 7 digits (allows 7-15 digit variations)
   const internationalRegex = /^\+[1-9]\d{6,14}$/;
   
-  if (!cleanPhone.startsWith('+')) {
-    return false;
-  }
-  
-  // Check length: + plus at least 7 digits = minimum 8 chars
-  if (cleanPhone.length < 8 || cleanPhone.length > 16) {
-    return false;
-  }
+  if (!cleanPhone.startsWith('+')) return false;
+  if (cleanPhone.length < 8 || cleanPhone.length > 16) return false;
   
   return internationalRegex.test(cleanPhone);
 };
 
-// Custom validator for express-validator
 const phoneValidator = (value) => {
   if (!validateInternationalPhone(value)) {
-    throw new Error('Please enter a valid international phone number (e.g., +923001234567, +12025551234)');
+    throw new Error('Please enter a valid international phone number (e.g., +923001234567)');
   }
   return true;
 };
 
 // ============================================
-// ✅ DEBUG MIDDLEWARE - Log all incoming requests
+// DEBUG MIDDLEWARE
 // ============================================
 router.use((req, res, next) => {
   console.log(`📍 Booking Route: ${req.method} ${req.baseUrl}${req.path}`);
@@ -69,21 +58,18 @@ router.use((req, res, next) => {
 });
 
 // ============================================
-// ✅ PUBLIC ROUTES - MUST BE FIRST & SPECIFIC
+// PUBLIC ROUTES
 // ============================================
 
-// PUBLIC CANCEL BOOKING (NO AUTH - sirf bookingId se)
+// PUBLIC CANCEL BOOKING
 router.put('/public/cancel/:bookingId', async (req, res) => {
   try {
     console.log('🚫 PUBLIC Cancel request for:', req.params.bookingId);
     
     const { reason, phone } = req.body;
-    
-    // bookingId se dhundho (public booking ke liye)
     const booking = await Booking.findOne({ bookingId: req.params.bookingId });
     
     if (!booking) {
-      console.log('❌ Booking not found:', req.params.bookingId);
       return res.status(404).json({
         success: false,
         message: 'Booking not found',
@@ -91,7 +77,6 @@ router.put('/public/cancel/:bookingId', async (req, res) => {
       });
     }
 
-    // SECURITY: Phone verification karo
     if (phone && booking.phone !== phone) {
       return res.status(403).json({
         success: false,
@@ -99,7 +84,6 @@ router.put('/public/cancel/:bookingId', async (req, res) => {
       });
     }
 
-    // Check if booking can be cancelled
     if (!['pending', 'confirmed'].includes(booking.status)) {
       return res.status(400).json({
         success: false,
@@ -111,8 +95,6 @@ router.put('/public/cancel/:bookingId', async (req, res) => {
     booking.cancellationReason = reason || 'Cancelled by customer';
     booking.cancelledAt = new Date();
     await booking.save();
-
-    console.log('✅ Public booking cancelled:', booking.bookingId);
 
     res.json({
       success: true,
@@ -126,15 +108,13 @@ router.put('/public/cancel/:bookingId', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Public cancel error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message
-    });
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });
 
-// PUBLIC BOOKING (NO AUTH REQUIRED)
+// ============================================
+// ✅ PUBLIC BOOKING - userId support added
+// ============================================
 router.post('/public', [
   body('customerName')
     .trim()
@@ -145,7 +125,7 @@ router.post('/public', [
     .notEmpty().withMessage('Phone number is required')
     .custom(phoneValidator),
   body('email')
-    .optional({ checkFalsy: true })  // ✅ FIXED: Empty string ko bhi optional maan lo
+    .optional({ checkFalsy: true })
     .trim()
     .isEmail().withMessage('Please enter a valid email'),
   body('service')
@@ -158,11 +138,12 @@ router.post('/public', [
     .trim()
     .notEmpty().withMessage('Address is required'),
   body('comments').optional().trim(),
+  // ✅ userId optional hai - agar logged in hai to ayega
+  body('userId').optional({ checkFalsy: true }),
 ], async (req, res) => {
   try {
     console.log('📥 Public booking request:', req.body);
 
-    // Validation
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       console.log('❌ Validation errors:', errors.array());
@@ -185,20 +166,41 @@ router.post('/public', [
       coordinates,
       placeId,
       platform,
-      language
+      language,
+      // ✅ NAYE FIELDS - user se linked booking
+      userId,
+      userEmail,
+      userName,
     } = req.body;
 
-    // Generate unique booking ID and order number
+    // ✅ Agar userId aaya hai to check karo ke valid User hai
+    let validUserId = null;
+    if (userId) {
+      try {
+        const userExists = await User.findById(userId);
+        if (userExists) {
+          validUserId = userExists._id;
+          console.log('✅ Logged-in user ki booking:', validUserId);
+        } else {
+          console.log('⚠️ userId aaya lekin user nahi mila, guest booking banate hain');
+        }
+      } catch (err) {
+        console.log('⚠️ userId invalid format, guest booking banate hain:', err.message);
+      }
+    }
+
     const bookingId = `BK${Date.now()}`;
     const orderNumber = `ORD-${new Date().toISOString().split('T')[0].replace(/-/g, '')}-${Math.floor(Math.random() * 10000)}`;
 
-    // Create booking
+    // ✅ UPDATED - user field set karo agar valid userId hai
     const booking = await Booking.create({
       bookingId,
       orderNumber,
+      // ✅ Yahi hai asli fix - user field set ho raha hai
+      user: validUserId || undefined,
       customerName: customerName.trim(),
       phone: phone.trim(),
-      email: email ? email.trim() : '',
+      email: email ? email.trim() : (userEmail || ''),
       service,
       date,
       time,
@@ -206,7 +208,7 @@ router.post('/public', [
       comments: comments ? comments.trim() : '',
       coordinates: coordinates || { latitude: 0, longitude: 0 },
       placeId: placeId || '',
-      platform: platform || 'web',
+      platform: platform || 'android',
       language: language || 'en',
       status: 'pending',
       servicePrice: service.basePrice || 0,
@@ -215,19 +217,23 @@ router.post('/public', [
       statusHistory: [{
         status: 'pending',
         timestamp: new Date(),
-        note: 'Booking created'
+        note: validUserId 
+          ? `Booking created by logged-in user: ${userName || customerName}`
+          : 'Booking created by guest'
       }],
       createdAt: new Date()
     });
 
-    console.log('✅ Public booking created:', bookingId);
+    console.log('✅ Booking created:', bookingId, validUserId ? `(User: ${validUserId})` : '(Guest)');
 
     res.status(201).json({
       success: true,
       message: 'Booking created successfully',
       data: {
         booking,
-        bookingId: booking.bookingId
+        bookingId: booking.bookingId,
+        // ✅ Frontend ko bata do ke user se linked hai ya nahi
+        isLinkedToUser: !!validUserId
       }
     });
 
@@ -242,7 +248,57 @@ router.post('/public', [
 });
 
 // ============================================
-// ✅ AUTH PROTECTED ROUTES - AFTER PUBLIC
+// GET BOOKINGS BY USER ID (PUBLIC - token se)
+// ✅ NAYA ROUTE - User apni saari bookings dekh sake
+// ============================================
+router.get('/public/:bookingId', async (req, res) => {
+  try {
+    const booking = await Booking.findOne({ bookingId: req.params.bookingId });
+    
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    res.json({ success: true, data: { booking } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
+// GET BOOKINGS BY PHONE
+router.get('/phone/:phone', async (req, res) => {
+  try {
+    const bookings = await Booking.find({ phone: req.params.phone })
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, data: { bookings } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
+// PATCH BOOKING STATUS
+router.patch('/:bookingId/status', async (req, res) => {
+  try {
+    const { status, note } = req.body;
+    const booking = await Booking.findOne({ bookingId: req.params.bookingId });
+
+    if (!booking) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    booking.status = status;
+    booking.statusHistory.push({ status, timestamp: new Date(), note: note || '' });
+    await booking.save();
+
+    res.json({ success: true, data: { booking } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
+// ============================================
+// AUTH PROTECTED ROUTES
 // ============================================
 
 // CREATE BOOKING (AUTH REQUIRED)
@@ -251,62 +307,38 @@ router.post('/', auth, [
   body('scheduledDate').notEmpty().withMessage('Scheduled date is required'),
   body('scheduledTime').notEmpty().withMessage('Scheduled time is required'),
   body('address').notEmpty().withMessage('Address is required'),
-  // UPDATED: International phone validation
-  body('phone')
-    .trim()
-    .notEmpty().withMessage('Phone number is required')
-    .custom(phoneValidator),
+  body('phone').trim().notEmpty().withMessage('Phone number is required').custom(phoneValidator),
   body('problemDescription').optional()
 ], async (req, res) => {
   try {
-    // Validation
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ 
         success: false, 
         errors: errors.array(),
-        message: errors.array()[0].msg // First error message
+        message: errors.array()[0].msg
       });
     }
 
-    const { 
-      serviceId, 
-      scheduledDate, 
-      scheduledTime, 
-      address, 
-      phone, 
-      problemDescription,
-      priority = 'normal',
-      images = [],
-      technicianId 
-    } = req.body;
+    const { serviceId, scheduledDate, scheduledTime, address, phone, problemDescription, priority = 'normal', images = [], technicianId } = req.body;
 
-    // Check if service exists
     const service = await Service.findById(serviceId);
     if (!service) {
-      return res.status(404).json({
-        success: false,
-        message: 'Service not found'
-      });
+      return res.status(404).json({ success: false, message: 'Service not found' });
     }
 
-    // Get user
     const user = await User.findById(req.user.id);
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
+      return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // Create booking
     const booking = new Booking({
       user: req.user.id,
       service: serviceId,
       scheduledDate,
       scheduledTime,
       address,
-      phone: phone.trim(), // Trim whitespace
+      phone: phone.trim(),
       problemDescription,
       priority,
       images,
@@ -314,7 +346,6 @@ router.post('/', auth, [
       status: 'pending'
     });
 
-    // Assign technician if specified
     if (technicianId) {
       const technician = await Technician.findOne({ user: technicianId });
       if (technician && technician.availability) {
@@ -324,11 +355,8 @@ router.post('/', auth, [
     }
 
     await booking.save();
-
-    // Populate booking with service details
     await booking.populate('service', 'name nameAr icon basePrice');
 
-    // Create notification
     const notification = new Notification({
       user: req.user.id,
       type: 'booking',
@@ -338,33 +366,21 @@ router.post('/', auth, [
     });
     await notification.save();
 
-    // TODO: Send email/SMS notification
-    // TODO: Notify available technicians
-
-    res.status(201).json({
-      success: true,
-      message: 'Booking created successfully',
-      booking
-    });
+    res.status(201).json({ success: true, message: 'Booking created successfully', booking });
 
   } catch (error) {
     console.error('Create booking error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// GET USER BOOKINGS
+// GET USER BOOKINGS (AUTH)
 router.get('/my-bookings', auth, async (req, res) => {
   try {
     const { status, limit = 10, page = 1 } = req.query;
     
     const query = { user: req.user.id };
-    if (status) {
-      query.status = status;
-    }
+    if (status) query.status = status;
 
     const skip = (page - 1) * limit;
     
@@ -380,24 +396,16 @@ router.get('/my-bookings', auth, async (req, res) => {
     res.json({
       success: true,
       bookings,
-      pagination: {
-        total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / limit)
-      }
+      pagination: { total, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(total / limit) }
     });
 
   } catch (error) {
     console.error('Get bookings error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// GET SINGLE BOOKING
+// GET SINGLE BOOKING (AUTH)
 router.get('/:id', auth, async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id)
@@ -406,81 +414,47 @@ router.get('/:id', auth, async (req, res) => {
       .populate('user', 'name email phone address');
 
     if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: 'Booking not found'
-      });
+      return res.status(404).json({ success: false, message: 'Booking not found' });
     }
 
-    // Check if user owns the booking or is admin/technician
-    if (booking.user._id.toString() !== req.user.id && 
-        req.user.role !== 'admin' && 
-        req.user.role !== 'technician') {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied'
-      });
+    if (booking.user._id.toString() !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'technician') {
+      return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    res.json({
-      success: true,
-      booking
-    });
+    res.json({ success: true, booking });
 
   } catch (error) {
     console.error('Get booking error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// UPDATE BOOKING
+// UPDATE BOOKING (AUTH)
 router.put('/:id', auth, [
-  body('phone')
-    .optional()
-    .trim()
-    .custom((value) => {
-      if (value && !validateInternationalPhone(value)) {
-        throw new Error('Please enter a valid international phone number');
-      }
-      return true;
-    })
+  body('phone').optional().trim().custom((value) => {
+    if (value && !validateInternationalPhone(value)) {
+      throw new Error('Please enter a valid international phone number');
+    }
+    return true;
+  })
 ], async (req, res) => {
   try {
-    // Validation
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({ 
-        success: false, 
-        errors: errors.array(),
-        message: errors.array()[0].msg
-      });
+      return res.status(400).json({ success: false, errors: errors.array(), message: errors.array()[0].msg });
     }
 
     const booking = await Booking.findById(req.params.id);
-    
     if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: 'Booking not found'
-      });
+      return res.status(404).json({ success: false, message: 'Booking not found' });
     }
 
-    // Check permissions
     if (booking.user.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied'
-      });
+      return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    // Only allow certain updates based on status
     const allowedUpdates = ['address', 'phone', 'problemDescription', 'images'];
-    if (booking.status === 'pending') {
-      allowedUpdates.push('scheduledDate', 'scheduledTime');
-    }
+    if (booking.status === 'pending') allowedUpdates.push('scheduledDate', 'scheduledTime');
 
     Object.keys(req.body).forEach(key => {
       if (allowedUpdates.includes(key)) {
@@ -491,55 +465,36 @@ router.put('/:id', auth, [
     await booking.save();
     await booking.populate('service', 'name nameAr icon basePrice');
 
-    res.json({
-      success: true,
-      message: 'Booking updated successfully',
-      booking
-    });
+    res.json({ success: true, message: 'Booking updated successfully', booking });
 
   } catch (error) {
     console.error('Update booking error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// CANCEL BOOKING (AUTH REQUIRED)
+// CANCEL BOOKING (AUTH)
 router.put('/:id/cancel', auth, async (req, res) => {
   try {
     const { reason } = req.body;
     const booking = await Booking.findById(req.params.id);
     
     if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: 'Booking not found'
-      });
+      return res.status(404).json({ success: false, message: 'Booking not found' });
     }
 
-    // Check permissions
     if (booking.user.toString() !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied'
-      });
+      return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    // Check if booking can be cancelled
     if (!['pending', 'confirmed'].includes(booking.status)) {
-      return res.status(400).json({
-        success: false,
-        message: `Booking cannot be cancelled in ${booking.status} status`
-      });
+      return res.status(400).json({ success: false, message: `Booking cannot be cancelled in ${booking.status} status` });
     }
 
     booking.status = 'cancelled';
     booking.cancellationReason = reason;
     await booking.save();
 
-    // Create notification
     const notification = new Notification({
       user: booking.user,
       type: 'booking',
@@ -549,54 +504,38 @@ router.put('/:id/cancel', auth, async (req, res) => {
     });
     await notification.save();
 
-    // Notify technician if assigned
     if (booking.technician) {
-      const techNotification = new Notification({
+      await new Notification({
         user: booking.technician,
         type: 'booking',
         title: 'Booking Cancelled',
         message: `Booking #${booking.orderNumber} has been cancelled.`,
         data: { bookingId: booking._id, orderNumber: booking.orderNumber }
-      });
-      await techNotification.save();
+      }).save();
     }
 
-    res.json({
-      success: true,
-      message: 'Booking cancelled successfully',
-      booking
-    });
+    res.json({ success: true, message: 'Booking cancelled successfully', booking });
 
   } catch (error) {
     console.error('Cancel booking error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// UPDATE BOOKING STATUS (Admin/Technician only)
+// UPDATE BOOKING STATUS (Admin/Technician)
 router.put('/:id/status', auth, async (req, res) => {
   try {
     const { status, notes } = req.body;
     
     if (req.user.role !== 'admin' && req.user.role !== 'technician') {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied'
-      });
+      return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
     const booking = await Booking.findById(req.params.id);
     if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: 'Booking not found'
-      });
+      return res.status(404).json({ success: false, message: 'Booking not found' });
     }
 
-    // Validate status transition
     const validTransitions = {
       pending: ['confirmed', 'cancelled'],
       confirmed: ['assigned', 'cancelled'],
@@ -606,180 +545,93 @@ router.put('/:id/status', auth, async (req, res) => {
     };
 
     if (!validTransitions[booking.status]?.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid status transition from ${booking.status} to ${status}`
-      });
+      return res.status(400).json({ success: false, message: `Invalid status transition from ${booking.status} to ${status}` });
     }
 
     booking.status = status;
-    if (notes) {
-      booking.technicianNotes = notes;
-    }
-
-    // If technician is updating status and not assigned, assign them
-    if (req.user.role === 'technician' && !booking.technician) {
-      booking.technician = req.user.id;
-    }
+    if (notes) booking.technicianNotes = notes;
+    if (req.user.role === 'technician' && !booking.technician) booking.technician = req.user.id;
 
     await booking.save();
 
-    // Create notification for customer
     const statusMessages = {
-      confirmed: 'confirmed',
-      assigned: 'assigned to a technician',
-      on_the_way: 'technician is on the way',
-      in_progress: 'in progress',
-      completed: 'completed',
-      cancelled: 'cancelled'
+      confirmed: 'confirmed', assigned: 'assigned to a technician',
+      on_the_way: 'technician is on the way', in_progress: 'in progress',
+      completed: 'completed', cancelled: 'cancelled'
     };
 
-    const notification = new Notification({
+    await new Notification({
       user: booking.user,
       type: 'booking',
       title: `Booking ${statusMessages[status]}`,
       message: `Your booking #${booking.orderNumber} is now ${statusMessages[status]}.`,
       data: { bookingId: booking._id, orderNumber: booking.orderNumber, status }
-    });
-    await notification.save();
+    }).save();
 
-    res.json({
-      success: true,
-      message: `Booking status updated to ${status}`,
-      booking
-    });
+    res.json({ success: true, message: `Booking status updated to ${status}`, booking });
 
   } catch (error) {
     console.error('Update status error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// SUBMIT FEEDBACK
+// SUBMIT FEEDBACK (AUTH)
 router.post('/:id/feedback', auth, async (req, res) => {
   try {
     const { rating, comment } = req.body;
     const booking = await Booking.findById(req.params.id);
     
-    if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: 'Booking not found'
-      });
-    }
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (booking.user.toString() !== req.user.id) return res.status(403).json({ success: false, message: 'Access denied' });
+    if (booking.status !== 'completed') return res.status(400).json({ success: false, message: 'Feedback can only be submitted for completed bookings' });
+    if (booking.customerFeedback) return res.status(400).json({ success: false, message: 'Feedback already submitted' });
 
-    // Check if user owns the booking
-    if (booking.user.toString() !== req.user.id) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied'
-      });
-    }
-
-    // Check if booking is completed
-    if (booking.status !== 'completed') {
-      return res.status(400).json({
-        success: false,
-        message: 'Feedback can only be submitted for completed bookings'
-      });
-    }
-
-    // Check if feedback already submitted
-    if (booking.customerFeedback) {
-      return res.status(400).json({
-        success: false,
-        message: 'Feedback already submitted for this booking'
-      });
-    }
-
-    booking.customerFeedback = {
-      rating,
-      comment,
-      date: new Date()
-    };
-
+    booking.customerFeedback = { rating, comment, date: new Date() };
     await booking.save();
 
-    // Update technician rating
     if (booking.technician) {
       const technician = await Technician.findOne({ user: booking.technician });
       if (technician) {
         const newTotalRatings = technician.totalRatings + 1;
-        const newRating = ((technician.rating * technician.totalRatings) + rating) / newTotalRatings;
-        
-        technician.rating = parseFloat(newRating.toFixed(1));
+        technician.rating = parseFloat(((technician.rating * technician.totalRatings + rating) / newTotalRatings).toFixed(1));
         technician.totalRatings = newTotalRatings;
         technician.completedJobs += 1;
-        
         await technician.save();
       }
     }
 
-    res.json({
-      success: true,
-      message: 'Feedback submitted successfully',
-      booking
-    });
+    res.json({ success: true, message: 'Feedback submitted successfully', booking });
 
   } catch (error) {
     console.error('Submit feedback error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// TRACK TECHNICIAN LOCATION
+// TRACK TECHNICIAN (AUTH)
 router.get('/:id/track', auth, async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id);
-    
-    if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: 'Booking not found'
-      });
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+
+    if (booking.user.toString() !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'technician') {
+      return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    // Check if user owns the booking
-    if (booking.user.toString() !== req.user.id && 
-        req.user.role !== 'admin' && 
-        req.user.role !== 'technician') {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied'
-      });
-    }
-
-    // Get technician location
     let location = null;
     if (booking.technician) {
       const technician = await Technician.findOne({ user: booking.technician });
-      if (technician && technician.currentLocation) {
-        location = {
-          coordinates: technician.currentLocation.coordinates,
-          lastUpdated: technician.currentLocation.lastUpdated
-        };
+      if (technician?.currentLocation) {
+        location = { coordinates: technician.currentLocation.coordinates, lastUpdated: technician.currentLocation.lastUpdated };
       }
     }
 
-    res.json({
-      success: true,
-      location,
-      status: booking.status,
-      estimatedArrival: booking.status === 'on_the_way' ? '15-20 minutes' : null
-    });
+    res.json({ success: true, location, status: booking.status, estimatedArrival: booking.status === 'on_the_way' ? '15-20 minutes' : null });
 
   } catch (error) {
     console.error('Track booking error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Server error'
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 

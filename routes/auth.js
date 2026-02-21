@@ -26,7 +26,6 @@ router.post('/register', [
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    // ✅ FIX: fullName ya name dono accept karo
     const { fullName, name, email, password, phone, address } = req.body;
     const userName = fullName || name;
 
@@ -56,7 +55,6 @@ router.post('/register', [
     await user.save();
     console.log("✅ User saved. OTP:", otp);
 
-    // ✅ Email alag try/catch mein
     try {
       await sendEmail(email, otp);
       console.log("✅ OTP email sent to:", email);
@@ -64,7 +62,6 @@ router.post('/register', [
       console.log("❌ Email send failed:", emailError.message);
     }
 
-    // ✅ TOKEN NAHI — sirf success
     res.status(201).json({
       success: true,
       message: 'Registration successful. OTP sent to your email.',
@@ -149,7 +146,6 @@ router.post('/login', [
     const user = await User.findOne({ email });
     if (!user) return res.status(401).json({ success: false, message: 'Invalid email or password' });
 
-    // ✅ PEHLE verify check
     if (!user.isVerified) {
       return res.status(403).json({ success: false, message: 'Please verify your email first', email });
     }
@@ -209,37 +205,78 @@ router.post('/social', async (req, res) => {
   }
 });
 
-// ✅ FORGOT PASSWORD
+// ✅ FORGOT PASSWORD — OTP generate karke email bhejo
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-    const resetToken = Math.random().toString(36).slice(2);
-    user.resetPasswordToken = resetToken;
-    user.resetPasswordExpires = Date.now() + 3600000;
+    // ✅ OTP generate karo
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    user.otp = otp;
+    user.otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     await user.save();
+    console.log("✅ Reset OTP generated:", otp);
 
-    res.json({ success: true, message: 'Password reset instructions sent to your email' });
+    // ✅ Email bhejo
+    try {
+      await sendEmail(email, otp);
+      console.log("✅ Reset OTP email sent to:", email);
+    } catch (emailError) {
+      console.log("❌ Reset email send failed:", emailError.message);
+    }
+
+    res.json({ success: true, message: 'Reset code sent to your email' });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
-// ✅ RESET PASSWORD
+
+// ✅ VERIFY RESET OTP — password reset ke liye OTP check karo
+router.post('/verify-reset-otp', async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    if (!user.otp || user.otp !== otp) {
+      return res.status(400).json({ success: false, message: 'Invalid OTP' });
+    }
+
+    if (user.otpExpires < new Date()) {
+      return res.status(400).json({ success: false, message: 'OTP expired. Please request a new one.' });
+    }
+
+    // OTP sahi hai — frontend ko confirm karo (delete mat karo, reset-password pe kaam aayega)
+    res.json({ success: true, message: 'OTP verified successfully' });
+
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ✅ RESET PASSWORD — OTP verify karke password update karo
 router.post('/reset-password/:token', async (req, res) => {
   try {
-    const { token } = req.params;
+    const { token } = req.params; // token = OTP code
     const { password } = req.body;
 
-    const user = await User.findOne({ resetPasswordToken: token, resetPasswordExpires: { $gt: Date.now() } });
-    if (!user) return res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
+    // ✅ OTP se user dhundo (valid + expire nahi hua)
+    const user = await User.findOne({
+      otp: token,
+      otpExpires: { $gt: new Date() }
+    });
+
+    if (!user) return res.status(400).json({ success: false, message: 'Invalid or expired reset code' });
 
     user.password = password;
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
+    user.otp = undefined;
+    user.otpExpires = undefined;
     await user.save();
+    console.log("✅ Password reset for:", user.email);
 
     res.json({ success: true, message: 'Password reset successful' });
   } catch (error) {
