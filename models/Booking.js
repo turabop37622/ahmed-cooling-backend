@@ -5,7 +5,7 @@ const bookingSchema = new mongoose.Schema({
   bookingId: {
     type: String,
     unique: true,
-    sparse: true // Allows multiple null values for backward compatibility
+    sparse: true
   },
   orderNumber: {
     type: String,
@@ -14,20 +14,21 @@ const bookingSchema = new mongoose.Schema({
   },
   
   // ============================================
-  // USER REFERENCES (Optional for public bookings)
+  // ✅ USER REFERENCES - ZAROORI FIELD
   // ============================================
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: false  // ✅ Changed to false for public bookings
+    required: false,  // Optional guest bookings ke liye
+    index: true      // ✅ FAST query - har user ke bookings nikalna fast hoga
   },
   
   // ============================================
   // SERVICE (Can be ObjectId OR embedded object)
   // ============================================
   service: {
-    type: mongoose.Schema.Types.Mixed,  // ✅ Allows both ObjectId and Object
-    required: false  // ✅ Made optional
+    type: mongoose.Schema.Types.Mixed,
+    required: false
   },
   
   // Service details for public bookings (when service is an object)
@@ -48,7 +49,7 @@ const bookingSchema = new mongoose.Schema({
   // ============================================
   customerName: {
     type: String,
-    required: false  // Will be required in public route validation
+    required: false
   },
   email: {
     type: String,
@@ -60,11 +61,11 @@ const bookingSchema = new mongoose.Schema({
   // ============================================
   scheduledDate: {
     type: Date,
-    required: false  // ✅ Made optional (will be set from date/time)
+    required: false
   },
   scheduledTime: {
     type: String,
-    required: false  // ✅ Made optional
+    required: false
   },
   
   // Public booking fields (from frontend)
@@ -84,7 +85,8 @@ const bookingSchema = new mongoose.Schema({
   },
   phone: {
     type: String,
-    required: true
+    required: true,
+    index: true  // ✅ Phone se search ke liye
   },
   
   coordinates: {
@@ -117,7 +119,8 @@ const bookingSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['pending', 'confirmed', 'assigned', 'on_the_way', 'in_progress', 'completed', 'cancelled'],
-    default: 'pending'
+    default: 'pending',
+    index: true  // ✅ Status se filter ke liye
   },
   priority: {
     type: String,
@@ -128,7 +131,7 @@ const bookingSchema = new mongoose.Schema({
   // Pricing
   estimatedCost: {
     type: Number,
-    required: false,  // ✅ Made optional
+    required: false,
     default: 0
   },
   servicePrice: {
@@ -214,7 +217,8 @@ const bookingSchema = new mongoose.Schema({
   
   createdAt: {
     type: Date,
-    default: Date.now
+    default: Date.now,
+    index: true  // ✅ Sorting ke liye
   },
   updatedAt: {
     type: Date,
@@ -225,7 +229,7 @@ const bookingSchema = new mongoose.Schema({
 });
 
 // ============================================
-// INDEXES
+// INDEXES - FAST QUERIES KE LIYE
 // ============================================
 bookingSchema.index({ location: '2dsphere' });
 bookingSchema.index({ bookingId: 1 });
@@ -233,6 +237,8 @@ bookingSchema.index({ orderNumber: 1 });
 bookingSchema.index({ phone: 1 });
 bookingSchema.index({ status: 1 });
 bookingSchema.index({ createdAt: -1 });
+// ✅ NAYA - User ke bookings nikalne ke liye COMPOUND INDEX
+bookingSchema.index({ user: 1, createdAt: -1 });
 
 // ============================================
 // PRE-SAVE MIDDLEWARE
@@ -288,10 +294,7 @@ bookingSchema.pre('save', function(next) {
 // ============================================
 bookingSchema.methods.toJSON = function() {
   const booking = this.toObject();
-  
-  // Clean up for frontend
   delete booking.__v;
-  
   return booking;
 };
 
