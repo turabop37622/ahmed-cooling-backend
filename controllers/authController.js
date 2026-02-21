@@ -28,21 +28,30 @@ exports.verifyOTP = async (req, res) => {
     user.otpExpires = undefined;
     await user.save();
 
-    // ✅ UPDATED - userId aur role dono include karo
+    // ✅ Token with userId
     const token = jwt.sign(
-      { userId: user._id, role: user.role },
+      { userId: user._id.toString(), role: user.role },
       process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token',
       { expiresIn: "7d" }
     );
 
     console.log("✅ User verified:", email, "ID:", user._id);
 
+    // ✅ RETURN RESPONSE WITH ALL REQUIRED FIELDS
     res.status(200).json({
       success: true,
       message: "Email verified successfully!",
       token,
-      user: user.toJSON(),
-      userId: user._id  // ✅ Frontend ke liye userId
+      userId: user._id.toString(),  // ✅ ZAROORI
+      user: {
+        id: user._id.toString(),     // ✅ ZAROORI
+        _id: user._id.toString(),    // ✅ ZAROORI
+        fullName: user.fullName || user.name || 'User',
+        email: user.email,
+        phone: user.phone || '',
+        address: user.address || '',
+        role: user.role || 'customer'
+      }
     });
 
   } catch (error) {
@@ -95,7 +104,6 @@ exports.login = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid email or password" });
     }
 
-    // ✅ PEHLE verify check
     if (!user.isVerified) {
       return res.status(403).json({
         success: false,
@@ -109,21 +117,30 @@ exports.login = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid email or password" });
     }
 
-    // ✅ UPDATED - userId aur role include karo
+    // ✅ Token with userId
     const token = jwt.sign(
-      { userId: user._id, role: user.role },
+      { userId: user._id.toString(), role: user.role },
       process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token',
       { expiresIn: "7d" }
     );
 
     console.log("✅ Login successful:", email, "ID:", user._id);
 
+    // ✅ RETURN RESPONSE WITH ALL REQUIRED FIELDS
     res.status(200).json({
       success: true,
       message: "Login successful",
       token,
-      user: user.toJSON(),
-      userId: user._id  // ✅ Frontend ke liye userId
+      userId: user._id.toString(),  // ✅ ZAROORI
+      user: {
+        id: user._id.toString(),     // ✅ ZAROORI
+        _id: user._id.toString(),    // ✅ ZAROORI
+        fullName: user.fullName || user.name || 'User',
+        email: user.email,
+        phone: user.phone || '',
+        address: user.address || '',
+        role: user.role || 'customer'
+      }
     });
 
   } catch (error) {
@@ -147,9 +164,8 @@ exports.refreshToken = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    // ✅ NAYA token banao
     const newToken = jwt.sign(
-      { userId: user._id, role: user.role },
+      { userId: user._id.toString(), role: user.role },
       JWT_SECRET,
       { expiresIn: "7d" }
     );
@@ -160,7 +176,16 @@ exports.refreshToken = async (req, res) => {
       success: true,
       message: "Token refreshed",
       token: newToken,
-      userId: user._id
+      userId: user._id.toString(),
+      user: {
+        id: user._id.toString(),
+        _id: user._id.toString(),
+        fullName: user.fullName || user.name || 'User',
+        email: user.email,
+        phone: user.phone || '',
+        address: user.address || '',
+        role: user.role || 'customer'
+      }
     });
 
   } catch (error) {
