@@ -157,6 +157,132 @@ const sendBookingConfirmedEmail = async (toEmail, data) => {
 };
 
 // ============================================
+// ✅ EMAIL: CUSTOMER - Booking Cancelled (NEW FIX)
+// ============================================
+const sendCustomerCancellationEmail = async (toEmail, data) => {
+  try {
+    if (!toEmail) return;
+    const { bookingId, customerName, serviceName, serviceIcon, date, time, cancellationReason } = data;
+
+    await axios.post('https://api.brevo.com/v3/smtp/email', {
+      sender: { name: "Ahmed Cooling Workshop", email: "turabop37622@gmail.com" },
+      to: [{ email: toEmail }],
+      subject: `❌ Booking Cancelled - ${bookingId} | Ahmed Cooling`,
+      htmlContent: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+          <div style="background:linear-gradient(135deg,#EF4444,#DC2626);padding:32px 24px;text-align:center;">
+            <h1 style="color:#fff;margin:0;font-size:26px;">❄️ Ahmed Cooling Workshop</h1>
+            <p style="color:rgba(255,255,255,0.9);margin:8px 0 0;">Booking Cancellation Notice</p>
+          </div>
+          <div style="background:#FEF2F2;padding:14px 24px;text-align:center;border-bottom:2px solid #FECACA;">
+            <p style="color:#991B1B;font-size:18px;font-weight:bold;margin:0;">❌ Your Booking Has Been Cancelled</p>
+          </div>
+          <div style="background:#fff;padding:28px 24px;">
+            <p style="color:#374151;font-size:15px;">Dear <strong>${customerName}</strong>, your booking has been cancelled.</p>
+            <div style="background:#FEF2F2;border-left:4px solid #EF4444;border-radius:8px;padding:14px 18px;margin:16px 0;">
+              <p style="margin:0;font-size:13px;color:#6B7280;">Booking ID</p>
+              <p style="margin:4px 0 0;font-size:22px;font-weight:bold;color:#DC2626;">${bookingId}</p>
+            </div>
+            <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+              <tr style="background:#F9FAFB;"><td style="padding:11px 14px;font-size:13px;color:#6B7280;width:40%;">🔧 Service</td><td style="padding:11px 14px;font-size:14px;font-weight:600;">${serviceIcon || '❄️'} ${serviceName}</td></tr>
+              <tr><td style="padding:11px 14px;font-size:13px;color:#6B7280;">📅 Date</td><td style="padding:11px 14px;font-size:14px;font-weight:600;">${date}</td></tr>
+              <tr style="background:#F9FAFB;"><td style="padding:11px 14px;font-size:13px;color:#6B7280;">🕐 Time</td><td style="padding:11px 14px;font-size:14px;font-weight:600;">${time}</td></tr>
+            </table>
+            ${cancellationReason ? `
+            <div style="background:#FEE2E2;border-radius:10px;padding:14px;margin-bottom:20px;border-left:4px solid #DC2626;">
+              <p style="color:#991B1B;font-size:13px;font-weight:600;margin:0 0 6px;">❌ Cancellation Reason:</p>
+              <p style="color:#7F1D1D;font-size:13px;margin:0;">${cancellationReason}</p>
+            </div>` : ''}
+            <div style="background:#EFF6FF;border-radius:8px;padding:14px;text-align:center;">
+              <p style="margin:0;font-size:13px;color:#1D4ED8;">Need help? Call us at <strong>+92 300 1234567</strong></p>
+              <p style="margin:6px 0 0;font-size:13px;color:#1D4ED8;">You can book a new appointment anytime through our app.</p>
+            </div>
+          </div>
+          <div style="background:#1F2937;padding:18px 24px;text-align:center;">
+            <p style="color:#9CA3AF;font-size:12px;margin:0;">© 2025 Ahmed Cooling & Appliances Workshop | 📞 +92 300 1234567</p>
+          </div>
+        </div>
+      `
+    }, { headers: { 'api-key': process.env.BREVO_API_KEY, 'Content-Type': 'application/json' } });
+
+    console.log('✅ Customer cancellation email sent to:', toEmail);
+  } catch (err) {
+    console.error('❌ Customer cancel email failed:', err.response?.data || err.message);
+  }
+};
+
+// ============================================
+// ✅ EMAIL: ADMIN - Booking Cancellation Alert
+// ============================================
+const sendBookingCancellationEmail = async (data) => {
+  try {
+    const { bookingId, orderNumber, customerName, customerPhone, serviceName, serviceIcon, date, time, cancellationReason } = data;
+
+    await axios.post('https://api.brevo.com/v3/smtp/email', {
+      sender: { name: "Ahmed Cooling - System", email: "turabop37622@gmail.com" },
+      to: [{ email: ADMIN_EMAIL }],
+      subject: `🚨 Booking CANCELLED: ${bookingId} | ${customerName}`,
+      htmlContent: `
+        <div style="font-family:Arial,sans-serif;max-width:650px;margin:auto;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.15);">
+          
+          <!-- ALERT Header -->
+          <div style="background:linear-gradient(135deg,#DC2626,#991B1B);padding:24px;text-align:center;">
+            <h1 style="color:#fff;margin:0;font-size:22px;">🚨 Booking CANCELLED!</h1>
+            <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">Customer ne apni booking cancel kar di</p>
+          </div>
+
+          <!-- Alert Banner -->
+          <div style="background:#FEF3C7;padding:14px 24px;text-align:center;border-bottom:2px solid #FDE68A;">
+            <p style="color:#92400E;font-size:16px;font-weight:bold;margin:0;">⚠️ Action Taken by Customer</p>
+            <p style="color:#B45309;margin:4px 0 0;font-size:13px;">Booking ID: <strong>${bookingId}</strong></p>
+          </div>
+
+          <div style="background:#fff;padding:28px 24px;">
+
+            <!-- Customer Info -->
+            <h3 style="color:#111827;font-size:15px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #E5E7EB;">👤 Customer Information</h3>
+            <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+              <tr style="background:#F9FAFB;"><td style="padding:10px 14px;font-size:13px;color:#6B7280;width:35%;">Name</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">${customerName}</td></tr>
+              <tr><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Phone</td><td style="padding:10px 14px;font-size:14px;font-weight:600;"><a href="tel:${customerPhone}" style="color:#3B82F6;">${customerPhone}</a></td></tr>
+            </table>
+
+            <!-- Booking Info -->
+            <h3 style="color:#111827;font-size:15px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #E5E7EB;">📋 Cancelled Booking Details</h3>
+            <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+              <tr style="background:#F9FAFB;"><td style="padding:10px 14px;font-size:13px;color:#6B7280;width:35%;">Service</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">${serviceIcon || '❄️'} ${serviceName}</td></tr>
+              <tr><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Date</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">📅 ${date}</td></tr>
+              <tr style="background:#F9FAFB;"><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Time</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">🕐 ${time}</td></tr>
+              <tr><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Order #</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">${orderNumber}</td></tr>
+            </table>
+
+            <!-- Cancellation Reason -->
+            ${cancellationReason ? `
+            <div style="background:#FEE2E2;border-radius:10px;padding:14px;margin-bottom:24px;border-left:4px solid #DC2626;">
+              <p style="color:#991B1B;font-size:13px;font-weight:600;margin:0 0 6px;">❌ Cancellation Reason:</p>
+              <p style="color:#7F1D1D;font-size:13px;margin:0;">${cancellationReason}</p>
+            </div>
+            ` : ''}
+
+            <div style="background:#EFF6FF;border-radius:8px;padding:12px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#1D4ED8;">Customer ne is booking ko cancel kar diya hai.</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#1D4ED8;">Agar re-booking chahiye to directly contact karein.</p>
+            </div>
+          </div>
+
+          <div style="background:#1F2937;padding:18px 24px;text-align:center;">
+            <p style="color:#9CA3AF;font-size:12px;margin:0;">© 2025 Ahmed Cooling Admin System</p>
+          </div>
+        </div>
+      `
+    }, { headers: { 'api-key': process.env.BREVO_API_KEY, 'Content-Type': 'application/json' } });
+
+    console.log('✅ Cancellation email sent to admin');
+  } catch (err) {
+    console.error('❌ Cancellation email failed:', err.response?.data || err.message);
+  }
+};
+
+// ============================================
 // ✅ EMAIL: ADMIN - New Booking with Confirm/Cancel Buttons
 // ============================================
 const sendAdminNotificationEmail = async (data) => {
@@ -384,6 +510,7 @@ router.use((req, res, next) => {
 // PUBLIC ROUTES
 // ============================================
 
+// ✅ User cancel booking + Admin & Customer dono ko email
 router.put('/public/cancel/:bookingId', async (req, res) => {
   try {
     const { reason, phone } = req.body;
@@ -395,7 +522,39 @@ router.put('/public/cancel/:bookingId', async (req, res) => {
     booking.status = 'cancelled';
     booking.cancellationReason = reason || 'Cancelled by customer';
     booking.cancelledAt = new Date();
+    booking.statusHistory.push({ status: 'cancelled', timestamp: new Date(), note: 'Cancelled by customer' });
     await booking.save();
+
+    const serviceData = typeof booking.service === 'object' ? booking.service : {};
+    const emailPayload = {
+      bookingId: booking.bookingId,
+      orderNumber: booking.orderNumber,
+      customerName: booking.customerName,
+      customerPhone: booking.phone,
+      serviceName: serviceData.name || serviceData.titleKey || 'AC Service',
+      serviceIcon: serviceData.icon || '❄️',
+      date: booking.date,
+      time: booking.time,
+      cancellationReason: reason || 'Cancelled by customer',
+    };
+
+    // ✅ ADMIN ko email
+    sendBookingCancellationEmail(emailPayload);
+
+    // ✅ CUSTOMER ko bhi email (NEW FIX)
+    if (booking.email) {
+      sendCustomerCancellationEmail(booking.email, {
+        bookingId: booking.bookingId,
+        customerName: booking.customerName,
+        serviceName: emailPayload.serviceName,
+        serviceIcon: emailPayload.serviceIcon,
+        date: booking.date,
+        time: booking.time,
+        cancellationReason: reason || 'Cancelled by customer',
+      });
+    }
+
+    console.log('✅ Public booking cancelled + Email sent to Admin & Customer');
 
     res.json({ success: true, message: 'Booking cancelled', data: { bookingId: booking.bookingId, status: booking.status } });
   } catch (error) {
@@ -591,6 +750,7 @@ router.get('/:id', auth, async (req, res) => {
   }
 });
 
+// ✅ Authenticated user cancel booking + Admin & Customer dono ko email
 router.put('/:id/cancel', auth, async (req, res) => {
   try {
     const { reason } = req.body;
@@ -600,8 +760,41 @@ router.put('/:id/cancel', auth, async (req, res) => {
     if (!['pending', 'confirmed'].includes(booking.status)) return res.status(400).json({ success: false, message: `Cannot cancel in ${booking.status} status` });
 
     booking.status = 'cancelled';
-    booking.cancellationReason = reason;
+    booking.cancellationReason = reason || 'Cancelled by customer';
+    booking.cancelledAt = new Date();
+    booking.statusHistory.push({ status: 'cancelled', timestamp: new Date(), note: 'Cancelled by customer' });
     await booking.save();
+
+    const serviceData = typeof booking.service === 'object' ? booking.service : {};
+    const emailPayload = {
+      bookingId: booking.bookingId || booking._id.toString(),
+      orderNumber: booking.orderNumber,
+      customerName: booking.customerName,
+      customerPhone: booking.phone,
+      serviceName: serviceData.name || serviceData.titleKey || 'AC Service',
+      serviceIcon: serviceData.icon || '❄️',
+      date: booking.date,
+      time: booking.time,
+      cancellationReason: reason,
+    };
+
+    // ✅ ADMIN ko email
+    sendBookingCancellationEmail(emailPayload);
+
+    // ✅ CUSTOMER ko bhi email (NEW FIX)
+    if (booking.email) {
+      sendCustomerCancellationEmail(booking.email, {
+        bookingId: emailPayload.bookingId,
+        customerName: booking.customerName,
+        serviceName: emailPayload.serviceName,
+        serviceIcon: emailPayload.serviceIcon,
+        date: booking.date,
+        time: booking.time,
+        cancellationReason: reason,
+      });
+    }
+
+    console.log('✅ Authenticated booking cancelled + Email sent to Admin & Customer');
 
     if (booking.user) await new Notification({ user: booking.user, type: 'booking', title: 'Booking Cancelled', message: `Your booking #${booking.orderNumber} has been cancelled.`, data: { bookingId: booking._id } }).save();
 
