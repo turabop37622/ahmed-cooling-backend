@@ -26,7 +26,7 @@ if (!MONGODB_URI) {
 // ============================================
 // MODELS (Loaded after DB connect)
 // ============================================
-let Booking, User, Service, Notification;
+let Booking, User, Service, Notification, Product, Ad;
 
 // ============================================
 // AUTH MIDDLEWARE
@@ -100,38 +100,52 @@ async function startServer() {
     // ============================================
     // LOAD MODELS AFTER CONNECTION
     // ============================================
-    Booking = require('./models/Booking');
-    User = require('./models/User');
-    Service = require('./models/Service');
+    Booking      = require('./models/Booking');
+    User         = require('./models/User');
+    Service      = require('./models/Service');
     Notification = require('./models/Notification');
+    Product      = require('./models/Product');   // ✅ NEW
+    Ad           = require('./models/Ad');         // ✅ NEW
 
     console.log('✅ Models loaded successfully');
 
     // ============================================
-    // AUTH ROUTES (USING SEPARATE FILE)
+    // AUTH ROUTES
     // ============================================
     const authRoutes = require('./routes/auth');
     app.use('/api/auth', authRoutes);
-
-    console.log('✅ Auth routes loaded successfully');
+    console.log('✅ Auth routes loaded');
 
     // ============================================
     // SERVICE ROUTES
     // ============================================
-
     app.get('/api/services', async (req, res) => {
       const services = await Service.find({ active: true });
       res.json({ success: true, data: services });
     });
 
     // ============================================
-    // BOOKING ROUTES (IMPORTANT)
+    // BOOKING ROUTES
     // ============================================
-
     const bookingRoutes = require('./routes/bookings');
     app.use('/api/bookings', bookingRoutes);
+    console.log('✅ Booking routes loaded');
 
-    console.log('✅ Routes loaded successfully\n');
+    // ============================================
+    // ✅ PRODUCT ROUTES (brands, models, categories)
+    // ============================================
+    const productRoutes = require('./routes/products');
+    app.use('/api/products', productRoutes);
+    console.log('✅ Product routes loaded');
+
+    // ============================================
+    // ✅ ADS ROUTES (post ad, my ads, admin)
+    // ============================================
+    const adRoutes = require('./routes/ads');
+    app.use('/api/ads', adRoutes);
+    console.log('✅ Ads routes loaded');
+
+    console.log('✅ All routes loaded successfully\n');
 
     // ============================================
     // ERROR HANDLING (MUST BE LAST)
@@ -157,6 +171,16 @@ async function startServer() {
     app.listen(PORT, '0.0.0.0', () => {
       console.log('════════════════════════════════════════════');
       console.log(`🚀 Server running on http://localhost:${PORT}`);
+      console.log('════════════════════════════════════════════');
+      console.log('📦 Available API endpoints:');
+      console.log(`   GET  /api/products/categories`);
+      console.log(`   GET  /api/products/brands?category=ac`);
+      console.log(`   GET  /api/products/models?category=ac&brand=Daikin`);
+      console.log(`   POST /api/ads`);
+      console.log(`   GET  /api/ads/my-ads`);
+      console.log(`   GET  /api/ads/active`);
+      console.log(`   PUT  /api/ads/admin/:id/approve`);
+      console.log(`   PUT  /api/ads/admin/:id/reject`);
       console.log('════════════════════════════════════════════');
     });
 
