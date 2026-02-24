@@ -19,7 +19,7 @@ const authMiddleware = (req, res, next) => {
 
 // ── POST /api/ads ────────────────────────────────────────────
 // Naya ad post karo (status: pending by default)
-router.post('/', authMiddleware, async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const {
       categoryId, categoryLabel, brand, model, variant,
@@ -28,7 +28,7 @@ router.post('/', authMiddleware, async (req, res) => {
     } = req.body;
 
     const ad = await Ad.create({
-      userId: req.userId,
+    userId: req.body.userId,
       categoryId, categoryLabel, brand, model, variant,
       variantLabel, condition,
       price: Number(price),
