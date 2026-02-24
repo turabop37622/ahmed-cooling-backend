@@ -667,10 +667,11 @@ router.get('/phone/:phone', async (req, res) => {
 // AUTH ROUTES
 // ============================================
 
+// ✅ FIX 1: req.user.userId → req.user.id
 router.get('/user/my-bookings', auth, async (req, res) => {
   try {
     const { status, limit = 10, page = 1 } = req.query;
-    const query = { user: req.user.userId };
+    const query = { user: req.user.id }; // ✅ FIXED: was req.user.userId
     if (status) query.status = status;
     const skip = (page - 1) * limit;
 
@@ -688,6 +689,7 @@ router.get('/user/my-bookings', auth, async (req, res) => {
   }
 });
 
+// ✅ FIX 2: req.user.userId → req.user.id (3 jagah)
 router.post('/', auth, [
   body('serviceId').notEmpty(),
   body('scheduledDate').notEmpty(),
@@ -704,10 +706,14 @@ router.post('/', auth, [
     const service = await Service.findById(serviceId);
     if (!service) return res.status(404).json({ success: false, message: 'Service not found' });
 
-    const user = await User.findById(req.user.userId);
+    const user = await User.findById(req.user.id); // ✅ FIXED: was req.user.userId
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
-    const booking = new Booking({ user: req.user.userId, service: serviceId, scheduledDate, scheduledTime, address, phone: phone.trim(), problemDescription, priority, images, estimatedCost: service.basePrice, status: 'pending' });
+    const booking = new Booking({
+      user: req.user.id, // ✅ FIXED: was req.user.userId
+      service: serviceId, scheduledDate, scheduledTime, address, phone: phone.trim(),
+      problemDescription, priority, images, estimatedCost: service.basePrice, status: 'pending'
+    });
 
     if (technicianId) {
       const tech = await Technician.findOne({ user: technicianId });
@@ -717,7 +723,13 @@ router.post('/', auth, [
     await booking.save();
     await booking.populate('service', 'name nameAr icon basePrice');
 
-    await new Notification({ user: req.user.userId, type: 'booking', title: 'Booking Received', message: `Your booking for ${service.name} received. Order #${booking.orderNumber}`, data: { bookingId: booking._id, orderNumber: booking.orderNumber } }).save();
+    await new Notification({
+      user: req.user.id, // ✅ FIXED: was req.user.userId
+      type: 'booking',
+      title: 'Booking Received',
+      message: `Your booking for ${service.name} received. Order #${booking.orderNumber}`,
+      data: { bookingId: booking._id, orderNumber: booking.orderNumber }
+    }).save();
 
     sendAdminNotificationEmail({
       bookingId: booking.bookingId || booking._id.toString(),
@@ -739,25 +751,32 @@ router.post('/', auth, [
   }
 });
 
+// ✅ FIX 3: req.user.userId → req.user.id
 router.get('/:id', auth, async (req, res) => {
   try {
-    const booking = await Booking.findById(req.params.id).populate('service').populate('technician', 'name phone rating').populate('user', 'name email phone');
+    const booking = await Booking.findById(req.params.id)
+      .populate('service')
+      .populate('technician', 'name phone rating')
+      .populate('user', 'name email phone');
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-    if (booking.user && booking.user._id.toString() !== req.user.userId && req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Access denied' });
+    if (booking.user && booking.user._id.toString() !== req.user.id && req.user.role !== 'admin') // ✅ FIXED: was req.user.userId
+      return res.status(403).json({ success: false, message: 'Access denied' });
     res.json({ success: true, booking });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });
 
-// ✅ Authenticated user cancel booking + Admin & Customer dono ko email
+// ✅ FIX 4: req.user.userId → req.user.id (2 jagah)
 router.put('/:id/cancel', auth, async (req, res) => {
   try {
     const { reason } = req.body;
     const booking = await Booking.findById(req.params.id);
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-    if (booking.user && booking.user.toString() !== req.user.userId && req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Access denied' });
-    if (!['pending', 'confirmed'].includes(booking.status)) return res.status(400).json({ success: false, message: `Cannot cancel in ${booking.status} status` });
+    if (booking.user && booking.user.toString() !== req.user.id && req.user.role !== 'admin') // ✅ FIXED: was req.user.userId
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    if (!['pending', 'confirmed'].includes(booking.status))
+      return res.status(400).json({ success: false, message: `Cannot cancel in ${booking.status} status` });
 
     booking.status = 'cancelled';
     booking.cancellationReason = reason || 'Cancelled by customer';
@@ -781,7 +800,7 @@ router.put('/:id/cancel', auth, async (req, res) => {
     // ✅ ADMIN ko email
     sendBookingCancellationEmail(emailPayload);
 
-    // ✅ CUSTOMER ko bhi email (NEW FIX)
+    // ✅ CUSTOMER ko bhi email
     if (booking.email) {
       sendCustomerCancellationEmail(booking.email, {
         bookingId: emailPayload.bookingId,
@@ -796,7 +815,13 @@ router.put('/:id/cancel', auth, async (req, res) => {
 
     console.log('✅ Authenticated booking cancelled + Email sent to Admin & Customer');
 
-    if (booking.user) await new Notification({ user: booking.user, type: 'booking', title: 'Booking Cancelled', message: `Your booking #${booking.orderNumber} has been cancelled.`, data: { bookingId: booking._id } }).save();
+    if (booking.user) await new Notification({
+      user: booking.user,
+      type: 'booking',
+      title: 'Booking Cancelled',
+      message: `Your booking #${booking.orderNumber} has been cancelled.`,
+      data: { bookingId: booking._id }
+    }).save();
 
     res.json({ success: true, message: 'Booking cancelled', booking });
   } catch (error) {
@@ -804,23 +829,38 @@ router.put('/:id/cancel', auth, async (req, res) => {
   }
 });
 
+// ✅ FIX 5: req.user.userId → req.user.id
 router.put('/:id/status', auth, async (req, res) => {
   try {
     const { status, notes } = req.body;
-    if (req.user.role !== 'admin' && req.user.role !== 'technician') return res.status(403).json({ success: false, message: 'Access denied' });
+    if (req.user.role !== 'admin' && req.user.role !== 'technician')
+      return res.status(403).json({ success: false, message: 'Access denied' });
 
     const booking = await Booking.findById(req.params.id);
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
 
-    const validTransitions = { pending: ['confirmed','cancelled'], confirmed: ['assigned','cancelled'], assigned: ['on_the_way','cancelled'], on_the_way: ['in_progress','cancelled'], in_progress: ['completed','cancelled'] };
-    if (!validTransitions[booking.status]?.includes(status)) return res.status(400).json({ success: false, message: `Invalid transition: ${booking.status} → ${status}` });
+    const validTransitions = {
+      pending: ['confirmed', 'cancelled'],
+      confirmed: ['assigned', 'cancelled'],
+      assigned: ['on_the_way', 'cancelled'],
+      on_the_way: ['in_progress', 'cancelled'],
+      in_progress: ['completed', 'cancelled']
+    };
+    if (!validTransitions[booking.status]?.includes(status))
+      return res.status(400).json({ success: false, message: `Invalid transition: ${booking.status} → ${status}` });
 
     booking.status = status;
     if (notes) booking.technicianNotes = notes;
-    if (req.user.role === 'technician' && !booking.technician) booking.technician = req.user.userId;
+    if (req.user.role === 'technician' && !booking.technician) booking.technician = req.user.id; // ✅ FIXED: was req.user.userId
     await booking.save();
 
-    if (booking.user) await new Notification({ user: booking.user, type: 'booking', title: `Booking ${status}`, message: `Your booking #${booking.orderNumber} is now ${status}.`, data: { bookingId: booking._id, status } }).save();
+    if (booking.user) await new Notification({
+      user: booking.user,
+      type: 'booking',
+      title: `Booking ${status}`,
+      message: `Your booking #${booking.orderNumber} is now ${status}.`,
+      data: { bookingId: booking._id, status }
+    }).save();
 
     res.json({ success: true, message: `Status updated to ${status}`, booking });
   } catch (error) {
@@ -828,21 +868,31 @@ router.put('/:id/status', auth, async (req, res) => {
   }
 });
 
+// ✅ FIX 6: req.user.userId → req.user.id
 router.post('/:id/feedback', auth, async (req, res) => {
   try {
     const { rating, comment } = req.body;
     const booking = await Booking.findById(req.params.id);
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-    if (booking.user.toString() !== req.user.userId) return res.status(403).json({ success: false, message: 'Access denied' });
-    if (booking.status !== 'completed') return res.status(400).json({ success: false, message: 'Only for completed bookings' });
-    if (booking.customerFeedback) return res.status(400).json({ success: false, message: 'Already submitted' });
+    if (booking.user.toString() !== req.user.id) // ✅ FIXED: was req.user.userId
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    if (booking.status !== 'completed')
+      return res.status(400).json({ success: false, message: 'Only for completed bookings' });
+    if (booking.customerFeedback)
+      return res.status(400).json({ success: false, message: 'Already submitted' });
 
     booking.customerFeedback = { rating, comment, date: new Date() };
     await booking.save();
 
     if (booking.technician) {
       const tech = await Technician.findOne({ user: booking.technician });
-      if (tech) { const n = tech.totalRatings+1; tech.rating = parseFloat(((tech.rating*tech.totalRatings+rating)/n).toFixed(1)); tech.totalRatings=n; tech.completedJobs+=1; await tech.save(); }
+      if (tech) {
+        const n = tech.totalRatings + 1;
+        tech.rating = parseFloat(((tech.rating * tech.totalRatings + rating) / n).toFixed(1));
+        tech.totalRatings = n;
+        tech.completedJobs += 1;
+        await tech.save();
+      }
     }
 
     res.json({ success: true, message: 'Feedback submitted', booking });
@@ -851,11 +901,13 @@ router.post('/:id/feedback', auth, async (req, res) => {
   }
 });
 
+// ✅ FIX 7: req.user.userId → req.user.id
 router.get('/:id/track', auth, async (req, res) => {
   try {
     const booking = await Booking.findById(req.params.id);
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-    if (booking.user.toString() !== req.user.userId && req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Access denied' });
+    if (booking.user.toString() !== req.user.id && req.user.role !== 'admin') // ✅ FIXED: was req.user.userId
+      return res.status(403).json({ success: false, message: 'Access denied' });
 
     let location = null;
     if (booking.technician) {
