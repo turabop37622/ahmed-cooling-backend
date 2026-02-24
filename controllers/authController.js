@@ -149,6 +149,8 @@ exports.login = async (req, res) => {
   }
 };
 
+const decoded = jwt.verify(token, process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token');
+console.log("🔥 TOKEN PAYLOAD:", decoded);
 // ================================
 // REFRESH TOKEN
 // ================================

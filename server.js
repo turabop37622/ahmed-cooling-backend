@@ -104,7 +104,7 @@ async function startServer() {
     User         = require('./models/User');
     Service      = require('./models/Service');
     Notification = require('./models/Notification');
-    Product      = require('./models/Product');   // ✅ NEW
+    Product      = require('./models/Products');   // ✅ NEW
     Ad           = require('./models/Ad');         // ✅ NEW
 
     console.log('✅ Models loaded successfully');

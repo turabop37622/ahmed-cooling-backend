@@ -2,7 +2,7 @@
 
 const express = require('express');
 const router  = express.Router();
-const Product = require('../models/Product');
+const Product = require('../models/Products');
 
 // ── GET /api/products/categories ────────────────────────────
 // Sab categories return karta hai
