@@ -21,24 +21,44 @@ const authMiddleware = (req, res, next) => {
 // Naya ad post karo (status: pending by default)
 router.post('/', async (req, res) => {
   try {
+
+    console.log("BODY RECEIVED:", req.body);
+    console.log("USER ID RECEIVED:", req.body.userId);
+
     const {
       categoryId, categoryLabel, brand, model, variant,
       variantLabel, condition, price, description,
       location, phone, images,
     } = req.body;
 
+    if (!req.body.userId) {
+      return res.status(400).json({
+        success: false,
+        message: "UserId missing from body"
+      });
+    }
+
     const ad = await Ad.create({
-    userId: req.body.userId,
-      categoryId, categoryLabel, brand, model, variant,
-      variantLabel, condition,
+      userId: req.body.userId,
+      categoryId,
+      categoryLabel,
+      brand,
+      model,
+      variant,
+      variantLabel,
+      condition,
       price: Number(price),
-      description, location, phone,
+      description,
+      location,
+      phone,
       images: images || [],
       status: 'pending',
     });
 
-    res.status(201).json({ success: true, message: 'Ad submitted. Pending admin approval.', data: ad });
+    res.status(201).json({ success: true, data: ad });
+
   } catch (err) {
+    console.log("ERROR:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
