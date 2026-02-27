@@ -1,11 +1,12 @@
 // backend/models/Ad.js
+// ✅ Professional level — userId properly ref kiya User model se
 
 const mongoose = require('mongoose');
 
 const AdSchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    ref: 'User',   // ✅ Population ke liye zaroori
     required: true,
   },
   categoryId: {
@@ -14,9 +15,9 @@ const AdSchema = new mongoose.Schema({
     required: true,
   },
   categoryLabel: { type: String },
-  brand:   { type: String, required: true },
-  model:   { type: String, required: true },
-  variant: { type: String },
+  brand:        { type: String, required: true },
+  model:        { type: String, required: true },
+  variant:      { type: String },
   variantLabel: { type: String },
   condition: {
     type: String,
@@ -34,10 +35,19 @@ const AdSchema = new mongoose.Schema({
     default: 'pending',
   },
   rejectReason: { type: String, default: '' },
-  views:  { type: Number, default: 0 },
-  calls:  { type: Number, default: 0 },
-  featured:   { type: Boolean, default: false },
-  expiryDate: { type: Date, default: null },
+  views:        { type: Number, default: 0 },
+  calls:        { type: Number, default: 0 },
+  featured:     { type: Boolean, default: false },
+  expiryDate:   { type: Date, default: null },
+
+  // ✅ NEW: Report count
+  reports:      { type: Number, default: 0 },
+
 }, { timestamps: true });
+
+// ✅ Index for faster queries
+AdSchema.index({ status: 1, createdAt: -1 });
+AdSchema.index({ userId: 1, status: 1 });
+AdSchema.index({ categoryId: 1, status: 1 });
 
 module.exports = mongoose.model('Ad', AdSchema);
