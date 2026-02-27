@@ -186,6 +186,79 @@ router.get('/admin/pending', async (req, res) => {
 });
 
 // ════════════════════════════════════════════════════════════
+//  GET /api/ads/admin/all — Sab ads (admin only)
+//  ✅ Har status + seller info populate
+//  Query: ?status=pending|active|rejected|all  ?category=ac
+// ════════════════════════════════════════════════════════════
+router.get('/admin/all', async (req, res) => {
+  try {
+    const { status, category } = req.query;
+    const filter = {};
+    if (status && status !== 'all') filter.status = status;
+    if (category) filter.categoryId = category;
+
+    const ads = await Ad
+      .find(filter)
+      .populate('userId', SELLER_FIELDS)
+      .sort({ createdAt: -1 });
+
+    res.json({ success: true, count: ads.length, data: ads });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+//  GET /api/ads/admin/users — Sab users + unke ad stats
+//  ✅ Admin ke liye user management
+// ════════════════════════════════════════════════════════════
+router.get('/admin/users', async (req, res) => {
+  try {
+    // Sab users fetch karo
+    const users = await User.find({})
+      .select('fullName email phone profileImage createdAt role isVerified')
+      .sort({ createdAt: -1 });
+
+    // Har user ke ad stats nikalo
+    const userIds = users.map(u => u._id);
+    const adStats = await Ad.aggregate([
+      { $match: { userId: { $in: userIds } } },
+      { $group: {
+        _id:      '$userId',
+        total:    { $sum: 1 },
+        active:   { $sum: { $cond: [{ $eq: ['$status', 'active']   }, 1, 0] } },
+        pending:  { $sum: { $cond: [{ $eq: ['$status', 'pending']  }, 1, 0] } },
+        rejected: { $sum: { $cond: [{ $eq: ['$status', 'rejected'] }, 1, 0] } },
+        totalCalls:{ $sum: '$calls' },
+        totalViews:{ $sum: '$views' },
+      }},
+    ]);
+
+    // Map stats to users
+    const statsMap = {};
+    adStats.forEach(s => { statsMap[String(s._id)] = s; });
+
+    const result = users.map(u => ({
+      _id:          u._id,
+      fullName:     u.fullName,
+      email:        u.email,
+      phone:        u.phone,
+      profileImage: u.profileImage,
+      createdAt:    u.createdAt,
+      role:         u.role,
+      isVerified:   u.isVerified,
+      stats: statsMap[String(u._id)] || {
+        total: 0, active: 0, pending: 0, rejected: 0, totalCalls: 0, totalViews: 0,
+      },
+    }));
+
+    res.json({ success: true, count: result.length, data: result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
 //  PUT /api/ads/admin/:id/approve
 // ════════════════════════════════════════════════════════════
 router.put('/admin/:id/approve', async (req, res) => {
