@@ -7,24 +7,36 @@ const userSchema = new mongoose.Schema({
     required: [true, 'Full name is required'],
     trim: true
   },
+
+  // ── Email auth ──
   email: {
     type: String,
-    required: [true, 'Email is required'],
     unique: true,
+    sparse: true,        // ✅ phone-only users ke liye null allow
     lowercase: true,
     trim: true,
     match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
   },
+
   password: {
     type: String,
     minlength: [6, 'Password must be at least 6 characters'],
     default: null
   },
+
+  // ── Phone auth (NEW) ──
   phone: {
     type: String,
-    match: [/^[0-9]{10,15}$/, 'Please enter a valid phone number'],
-    default: ''
+    unique: true,
+    sparse: true,        // ✅ email-only users ke liye null allow
+    trim: true,
+    default: null
   },
+  isPhoneVerified: {
+    type: Boolean,
+    default: false
+  },
+
   address: {
     type: String,
     default: ''
@@ -44,25 +56,25 @@ const userSchema = new mongoose.Schema({
     default: 'en'
   },
   settings: {
-    pushNotifications: { type: Boolean, default: true },
+    pushNotifications:  { type: Boolean, default: true },
     emailNotifications: { type: Boolean, default: true },
-    smsNotifications: { type: Boolean, default: false }
+    smsNotifications:   { type: Boolean, default: false }
   },
+
+  // ── Email verification ──
   isVerified: {
     type: Boolean,
     default: false
   },
   verificationToken: String,
-  otp: {
-    type: String
-  },
-  otpExpires: {
-    type: Date
-  },
-  resetPasswordToken: String,
+  otp:        { type: String },
+  otpExpires: { type: Date },
+
+  // ── Password reset ──
+  resetPasswordToken:   String,
   resetPasswordExpires: Date,
 
-  // =============== GOOGLE OAUTH FIELDS ===============
+  // ── Google OAuth ──
   googleId: {
     type: String,
     unique: true,
@@ -70,22 +82,21 @@ const userSchema = new mongoose.Schema({
   },
   authProvider: {
     type: String,
-    enum: ['local', 'google'],
+    enum: ['local', 'phone', 'google'],  // ✅ 'phone' add kiya
     default: 'local'
   },
   googleProfile: {
     displayName: String,
-    picture: String
+    picture:     String
   }
-  // ===================================================
-}, {
-  timestamps: true
-});
 
-// Hash password before saving (only if password is modified)
-userSchema.pre('save', async function(next) {
+}, { timestamps: true });
+
+// ─────────────────────────────────────────
+//  Pre-save: hash password
+// ─────────────────────────────────────────
+userSchema.pre('save', async function (next) {
   if (!this.password || !this.isModified('password')) return next();
-  
   try {
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
@@ -95,32 +106,33 @@ userSchema.pre('save', async function(next) {
   }
 });
 
-// Compare password method
-userSchema.methods.comparePassword = async function(candidatePassword) {
+// ─────────────────────────────────────────
+//  Instance methods
+// ─────────────────────────────────────────
+userSchema.methods.comparePassword = async function (candidatePassword) {
   if (!this.password) return false;
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// ✅ Normal response ke liye - OTP fields hidden
-userSchema.methods.toJSON = function() {
+// Normal response — OTP/password hidden
+userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
   delete obj.verificationToken;
   delete obj.resetPasswordToken;
   delete obj.resetPasswordExpires;
-  delete obj.otp;        // ✅ Normal response mein hidden rahega
-  delete obj.otpExpires; // ✅ Normal response mein hidden rahega
+  delete obj.otp;
+  delete obj.otpExpires;
   return obj;
 };
 
-// ✅ Jab OTP include karna ho tab yeh method use karo
-userSchema.methods.toJSONWithOTP = function() {
+// Jab OTP include karna ho
+userSchema.methods.toJSONWithOTP = function () {
   const obj = this.toObject();
   delete obj.password;
   delete obj.verificationToken;
   delete obj.resetPasswordToken;
   delete obj.resetPasswordExpires;
-  // OTP fields DELETE NAHI ho rahe ✅
   return obj;
 };
 
