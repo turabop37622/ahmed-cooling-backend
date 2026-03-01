@@ -6,15 +6,65 @@ const Product    = require('../models/Products');
 const cloudinary = require('../utils/cloudinary');
 const upload     = require('../utils/multer');
 
-// ── (tumhare existing routes waise hi rahenge) ───────────────
+// ── GET /api/products/categories ────────────────────────────
+router.get('/categories', async (req, res) => {
+  try {
+    const CATEGORIES = [
+      { id: 'ac',      label: 'AC',              emoji: '❄️',  color: '#3B82F6' },
+      { id: 'led',     label: 'LED TV',          emoji: '📺',  color: '#8B5CF6' },
+      { id: 'fridge',  label: 'Refrigerator',    emoji: '🧊',  color: '#06B6D4' },
+      { id: 'washing', label: 'Washing Machine', emoji: '🫧',  color: '#10B981' },
+    ];
+    res.json({ success: true, data: CATEGORIES });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
-router.get('/categories', async (req, res) => { /* ... */ });
-router.get('/brands',     async (req, res) => { /* ... */ });
-router.get('/models',     async (req, res) => { /* ... */ });
-router.get('/all',        async (req, res) => { /* ... */ });
+// ── GET /api/products/brands?category=ac ────────────────────
+router.get('/brands', async (req, res) => {
+  try {
+    const { category } = req.query;
+    if (!category) {
+      return res.status(400).json({ success: false, message: 'category required' });
+    }
+    const brands = await Product.distinct('brand', { categoryId: category });
+    res.json({ success: true, data: brands.sort() });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── GET /api/products/models?category=ac&brand=Daikin ────────
+router.get('/models', async (req, res) => {
+  try {
+    const { category, brand } = req.query;
+    if (!category || !brand) {
+      return res.status(400).json({ success: false, message: 'category aur brand dono required hain' });
+    }
+    const models = await Product.find(
+      { categoryId: category, brand },
+      { model: 1, type: 1, variants: 1, _id: 0 }
+    );
+    res.json({ success: true, data: models });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ── GET /api/products/all ────────────────────────────────────
+router.get('/all', async (req, res) => {
+  try {
+    const { category } = req.query;
+    const filter = category ? { categoryId: category } : {};
+    const products = await Product.find(filter);
+    res.json({ success: true, data: products });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 // ── POST /api/products/add ───────────────────────────────────
-// Naya product + image upload
 router.post('/add', upload.single('image'), async (req, res) => {
   try {
     const { categoryId, brand, model, type, variants } = req.body;
@@ -22,7 +72,6 @@ router.post('/add', upload.single('image'), async (req, res) => {
     let imageUrl      = '';
     let imagePublicId = '';
 
-    // Agar image bheji hai toh Cloudinary pe upload karo
     if (req.file) {
       const result = await new Promise((resolve, reject) => {
         cloudinary.uploader.upload_stream(
@@ -56,7 +105,6 @@ router.post('/add', upload.single('image'), async (req, res) => {
 });
 
 // ── PUT /api/products/:id/image ──────────────────────────────
-// Existing product ki image update karo
 router.put('/:id/image', upload.single('image'), async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -64,12 +112,10 @@ router.put('/:id/image', upload.single('image'), async (req, res) => {
       return res.status(404).json({ success: false, message: 'Product nahi mila' });
     }
 
-    // Purani image Cloudinary se delete karo
     if (product.imagePublicId) {
       await cloudinary.uploader.destroy(product.imagePublicId);
     }
 
-    // Nayi image upload karo
     const result = await new Promise((resolve, reject) => {
       cloudinary.uploader.upload_stream(
         { folder: 'ahmedcooling/products' },
@@ -92,7 +138,6 @@ router.put('/:id/image', upload.single('image'), async (req, res) => {
 });
 
 // ── DELETE /api/products/:id ─────────────────────────────────
-// Product + uski image dono delete karo
 router.delete('/:id', async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -100,7 +145,6 @@ router.delete('/:id', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Product nahi mila' });
     }
 
-    // Cloudinary se image bhi hatao
     if (product.imagePublicId) {
       await cloudinary.uploader.destroy(product.imagePublicId);
     }
