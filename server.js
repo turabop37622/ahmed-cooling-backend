@@ -20,6 +20,11 @@ app.get('/', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
+// ✅ RENDER HEALTH CHECK (VERY IMPORTANT)
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK' });
+});
+
 // ============================================
 // MONGODB URI
 // ============================================
@@ -55,37 +60,6 @@ const auth = (req, res, next) => {
     res.status(401).json({ success: false, error: 'Invalid token' });
   }
 };
-
-// ============================================
-// BASIC ROUTES
-// ============================================
-
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Ahmed Cooling Workshop API',
-    status: 'Running',
-    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected',
-    version: '2.0'
-  });
-});
-
-app.get('/api/test', (req, res) => {
-  res.json({ 
-    message: 'AC Workshop API is working!',
-    version: '2.0',
-    timestamp: new Date().toISOString(),
-    mongoStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
-  });
-});
-
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    success: true,
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    mongoStatus: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
-  });
-});
 
 // ============================================
 // START SERVER WITH DB CONNECTION
