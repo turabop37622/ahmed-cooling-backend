@@ -14,6 +14,13 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // ============================================
+// HEALTH CHECK - Render ke liye
+// ============================================
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// ============================================
 // MONGODB URI
 // ============================================
 const MONGODB_URI = process.env.MONGODB_URI;
