@@ -26,6 +26,18 @@ const ProductSchema = new mongoose.Schema({
     type: [String],
     default: [],
   },
+
+  // ── Cloudinary image fields ──────────────────────────────
+  imageUrl: {
+    type: String,
+    default: '',
+  },
+  imagePublicId: {       // delete ke liye zaroori
+    type: String,
+    default: '',
+  },
+  // ────────────────────────────────────────────────────────
+
 }, { timestamps: true });
 
 module.exports = mongoose.model('Product', ProductSchema);
