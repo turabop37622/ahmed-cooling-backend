@@ -317,12 +317,21 @@ router.post('/phone/login', async (req, res) => {
 // ================================
 // SOCIAL LOGIN
 // ================================
+// ================================
+// SOCIAL LOGIN — FIXED
+// ================================
 router.post('/social', async (req, res) => {
   try {
     const { email, fullName, provider, googleId, picture } = req.body;
+
+    if (!email || !provider) {
+      return res.status(400).json({ success: false, message: 'Email and provider are required' });
+    }
+
     let user = await User.findOne({ email });
 
     if (!user) {
+      // ── Naya user banao ──
       user = new User({
         email,
         fullName:     fullName || email.split('@')[0],
@@ -330,15 +339,32 @@ router.post('/social', async (req, res) => {
         phone:        null,
         address:      '',
         isVerified:   true,
-        authProvider: provider === 'google' ? 'google' : 'local',
+        authProvider: provider,
         googleId:     googleId || undefined,
         googleProfile: { displayName: fullName, picture },
-        profileImage:  picture || ''
+        profileImage:  picture || '',
       });
       await user.save();
+      console.log('✅ New social user created:', email, 'Provider:', provider);
+
+    } else {
+      // ── Existing user update karo ──
+      user.fullName     = fullName || user.fullName;
+      user.authProvider = provider;
+      user.isVerified   = true;
+      user.profileImage = picture || user.profileImage;
+      user.googleProfile = { displayName: fullName, picture };
+
+      if (provider === 'google' && googleId) {
+        user.googleId = googleId;
+      }
+
+      await user.save();
+      console.log('✅ Existing user updated with social login:', email);
     }
 
     const token = generateToken(user);
+
     res.json({
       success: true,
       message: `Logged in with ${provider}`,
@@ -347,7 +373,8 @@ router.post('/social', async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('❌ Social login error:', error);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });
 
