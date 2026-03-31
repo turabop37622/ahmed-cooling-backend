@@ -1,4 +1,5 @@
 const sendEmail = require('../utils/sendEmail');
+const sendSMS   = require('../utils/sendSMS');
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
@@ -31,6 +32,21 @@ const userResponse = (user) => ({
 });
 
 // ================================
+// PHONE VALIDATION — PK & SA only
+// ================================
+const validatePhoneNumber = (phone) => {
+  if (!phone) return { valid: false, msg: 'Phone number is required' };
+  const clean = phone.replace(/[^\d+]/g, '');
+  if (clean.startsWith('+92')) {
+    return /^\+923\d{9}$/.test(clean) ? { valid: true } : { valid: false, msg: 'Pakistan: +92 3XX XXXXXXX' };
+  }
+  if (clean.startsWith('+966')) {
+    return /^\+9665\d{8}$/.test(clean) ? { valid: true } : { valid: false, msg: 'Saudi: +966 5X XXXXXXXX' };
+  }
+  return { valid: false, msg: 'Only Pakistan (+92) and Saudi Arabia (+966) numbers allowed' };
+};
+
+// ================================
 // EMAIL: REGISTER
 // ================================
 router.post('/register', [
@@ -50,9 +66,23 @@ router.post('/register', [
       return res.status(400).json({ success: false, message: 'Full name is required' });
     }
 
+    if (!phone) {
+      return res.status(400).json({ success: false, message: 'Phone number is required' });
+    }
+
+    const phoneCheck = validatePhoneNumber(phone);
+    if (!phoneCheck.valid) {
+      return res.status(400).json({ success: false, message: phoneCheck.msg });
+    }
+
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ success: false, message: 'User already exists with this email' });
+    }
+
+    const existingPhone = await User.findOne({ phone });
+    if (existingPhone) {
+      return res.status(400).json({ success: false, message: 'This phone number is already registered' });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -61,7 +91,7 @@ router.post('/register', [
       fullName: userName,
       email,
       password,
-      phone:    phone   || null,
+      phone,
       address:  address || '',
       otp,
       otpExpires:   new Date(Date.now() + 10 * 60 * 1000),
@@ -72,17 +102,43 @@ router.post('/register', [
     await user.save();
     console.log('✅ User saved. OTP:', otp);
 
-    try {
-      await sendEmail(email, otp);
-      console.log('✅ OTP email sent to:', email);
-    } catch (emailError) {
-      console.log('❌ Email send failed:', emailError.message);
+    let otpSentVia = 'console';
+
+    // SMS OTP (primary), email fallback
+    if (phone) {
+      try {
+        await sendSMS(phone, otp);
+        otpSentVia = 'sms';
+        console.log('✅ OTP sent via SMS to:', phone);
+      } catch (smsErr) {
+        console.log('❌ SMS failed, trying email:', smsErr.message);
+        try {
+          await sendEmail(email, otp);
+          otpSentVia = 'email';
+          console.log('✅ OTP fallback email sent to:', email);
+        } catch (emailErr) {
+          console.log('❌ Email also failed:', emailErr.message);
+        }
+      }
+    } else {
+      try {
+        await sendEmail(email, otp);
+        otpSentVia = 'email';
+      } catch (emailErr) {
+        console.log('❌ Email send failed:', emailErr.message);
+      }
     }
+
+    const maskedPhone = phone ? phone.slice(0, 4) + '****' + phone.slice(-3) : null;
 
     res.status(201).json({
       success: true,
-      message: 'Registration successful. OTP sent to your email.',
-      email
+      message: otpSentVia === 'sms'
+        ? `OTP sent to your phone (${maskedPhone})`
+        : 'OTP sent to your email.',
+      email,
+      phone: maskedPhone,
+      otpSentVia,
     });
 
   } catch (error) {
@@ -92,14 +148,18 @@ router.post('/register', [
 });
 
 // ================================
-// EMAIL: VERIFY OTP
+// VERIFY OTP — email or phone
 // ================================
 router.post('/verify-otp', async (req, res) => {
   try {
-    const { email, otp } = req.body;
-    console.log('🔍 Verifying OTP for:', email, 'OTP:', otp);
+    const { email, phone, otp } = req.body;
+    const identifier = email || phone;
+    console.log('🔍 Verifying OTP for:', identifier, 'OTP:', otp);
 
-    const user = await User.findOne({ email });
+    const user = email
+      ? await User.findOne({ email })
+      : await User.findOne({ phone });
+
     if (!user) return res.status(400).json({ success: false, message: 'User not found' });
 
     if (!user.otp || user.otp !== otp) {
@@ -111,12 +171,26 @@ router.post('/verify-otp', async (req, res) => {
     }
 
     user.isVerified = true;
+    if (phone || user.authProvider === 'phone') {
+      user.isPhoneVerified = true;
+    }
     user.otp        = undefined;
     user.otpExpires = undefined;
     await user.save();
-    console.log('✅ User verified:', email);
+    console.log('✅ User verified:', identifier);
 
-    res.status(200).json({ success: true, message: 'Email verified successfully! Please login.' });
+    if (phone && !email) {
+      const token = generateToken(user);
+      return res.status(200).json({
+        success: true,
+        message: 'Phone verified! Welcome to Ahmed Cooling.',
+        token,
+        userId: user._id.toString(),
+        user: userResponse(user),
+      });
+    }
+
+    res.status(200).json({ success: true, message: 'Verified successfully! Please login.' });
 
   } catch (error) {
     console.error('❌ Verify OTP error:', error);
@@ -129,21 +203,43 @@ router.post('/verify-otp', async (req, res) => {
 // ================================
 router.post('/resend-otp', async (req, res) => {
   try {
-    const { email } = req.body;
+    const { email, phone } = req.body;
 
-    const user = await User.findOne({ email });
-    if (!user)           return res.status(404).json({ success: false, message: 'User not found' });
-    if (user.isVerified) return res.status(400).json({ success: false, message: 'User already verified' });
+    const user = email
+      ? await User.findOne({ email })
+      : await User.findOne({ phone });
+
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.isVerified && user.isPhoneVerified) return res.status(400).json({ success: false, message: 'User already verified' });
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     user.otp        = otp;
     user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    await sendEmail(email, otp);
-    console.log('✅ OTP resent to:', email);
+    let otpSentVia = 'console';
+    const userPhone = user.phone || phone;
 
-    res.status(200).json({ success: true, message: 'OTP resent successfully' });
+    if (userPhone) {
+      try {
+        await sendSMS(userPhone, otp);
+        otpSentVia = 'sms';
+        console.log('✅ OTP resent via SMS to:', userPhone);
+      } catch (smsErr) {
+        console.log('❌ SMS resend failed:', smsErr.message);
+        if (user.email) {
+          try { await sendEmail(user.email, otp); otpSentVia = 'email'; } catch {}
+        }
+      }
+    } else if (user.email) {
+      try { await sendEmail(user.email, otp); otpSentVia = 'email'; } catch {}
+    }
+
+    res.status(200).json({
+      success: true,
+      message: otpSentVia === 'sms' ? 'OTP resent to your phone' : 'OTP resent to your email',
+      otpSentVia,
+    });
 
   } catch (error) {
     console.error('❌ Resend OTP error:', error);
@@ -194,77 +290,58 @@ router.post('/login', [
 });
 
 // ================================
-// PHONE: REGISTER  ← NEW
-// ================================
-// Flow:
-//   Step 1 — Frontend calls this with { name, phone, password, otpVerified: false }
-//             → User saved as unverified
-//   Step 2 — Firebase OTP verify hone ke baad frontend calls again with { otpVerified: true }
-//             → User marked as verified + token return
+// PHONE: REGISTER — OTP via email (FREE)
 // ================================
 router.post('/phone/register', async (req, res) => {
   try {
-    const { fullName, name, phone, password, otpVerified = false } = req.body;
+    const { fullName, name, phone, password, email } = req.body;
     const userName = fullName || name;
 
     if (!userName || !phone || !password) {
       return res.status(400).json({ success: false, message: 'Name, phone and password are required' });
     }
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Email is required for OTP verification' });
+    }
 
-    if (!/^\+\d{10,15}$/.test(phone)) {
-      return res.status(400).json({ success: false, message: 'Invalid phone format. Use +923001234567' });
+    const phoneCheck = validatePhoneNumber(phone);
+    if (!phoneCheck.valid) {
+      return res.status(400).json({ success: false, message: phoneCheck.msg });
     }
 
     let user = await User.findOne({ phone });
-
-    // ── Step 2: OTP verified by Firebase, mark phone verified ──
-    if (otpVerified) {
-      if (!user) {
-        return res.status(404).json({ success: false, message: 'User not found. Please register again.' });
-      }
-
-      user.isPhoneVerified = true;
-      await user.save();
-
-      const token = generateToken(user);
-      console.log('✅ Phone verified & login:', phone, 'ID:', user._id);
-
-      return res.json({
-        success: true,
-        message: 'Phone verified! Welcome to Ahmed Cooling.',
-        token,
-        userId: user._id.toString(),
-        user: userResponse(user),
-      });
+    if (user && user.isPhoneVerified) {
+      return res.status(409).json({ success: false, message: 'Phone already registered. Please sign in.' });
     }
 
-    // ── Step 1: Save user as pending verification ──
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
     if (user) {
-      if (user.isPhoneVerified) {
-        return res.status(409).json({ success: false, message: 'Phone number already registered. Please sign in.' });
-      }
-      // Update pending user (retry attempt)
       user.fullName = userName;
-      user.password = password;   // pre-save will re-hash
+      user.password = password;
+      user.email = email;
+      user.otp = otp;
+      user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
       await user.save();
     } else {
       user = new User({
-        fullName: userName,
-        phone,
-        password,
-        authProvider:    'phone',
-        isPhoneVerified: false,
-        isVerified:      true,    // no email to verify
+        fullName: userName, phone, email, password,
+        authProvider: 'phone', isPhoneVerified: false, isVerified: false,
+        otp, otpExpires: new Date(Date.now() + 10 * 60 * 1000),
       });
       await user.save();
     }
 
-    console.log('✅ Phone user created (pending OTP):', phone);
+    console.log('✅ Phone user saved, OTP:', otp);
 
-    return res.status(201).json({
-      success: true,
-      message: 'User created. Please verify your phone number.',
-    });
+    try {
+      await sendEmail(email, otp);
+      console.log('✅ OTP email sent to:', email);
+    } catch (emailErr) {
+      console.log('❌ Email failed:', emailErr.message);
+    }
+
+    res.status(201).json({ success: true, message: 'OTP sent to your email.' });
 
   } catch (error) {
     console.error('❌ Phone register error:', error);

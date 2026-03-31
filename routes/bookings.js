@@ -32,17 +32,32 @@ const auth = (req, res, next) => {
 };
 
 // ============================================
-// PHONE VALIDATION
+// PHONE VALIDATION — Pakistan & Saudi Arabia only
 // ============================================
-const validateInternationalPhone = (phone) => {
-  const cleanPhone = phone.replace(/[^\d+]/g, '');
-  if (!cleanPhone.startsWith('+')) return false;
-  if (cleanPhone.length < 8 || cleanPhone.length > 16) return false;
-  return /^\+[1-9]\d{6,14}$/.test(cleanPhone);
+const validatePhone = (phone) => {
+  const clean = phone.replace(/[^\d+]/g, '');
+  if (!clean.startsWith('+')) return { valid: false, msg: 'Phone must start with country code (+92 or +966)' };
+
+  // Pakistan: +92 3XX XXXXXXX (total 13 chars)
+  if (clean.startsWith('+92')) {
+    const local = clean.slice(3);
+    if (!/^3\d{9}$/.test(local)) return { valid: false, msg: 'Pakistan number must be +92 3XXXXXXXXX (10 digits starting with 3)' };
+    return { valid: true };
+  }
+
+  // Saudi Arabia: +966 5X XXXXXXX (total 13 chars)
+  if (clean.startsWith('+966')) {
+    const local = clean.slice(4);
+    if (!/^5\d{8}$/.test(local)) return { valid: false, msg: 'Saudi number must be +966 5XXXXXXXX (9 digits starting with 5)' };
+    return { valid: true };
+  }
+
+  return { valid: false, msg: 'Only Pakistan (+92) and Saudi Arabia (+966) numbers are supported' };
 };
 
 const phoneValidator = (value) => {
-  if (!validateInternationalPhone(value)) throw new Error('Please enter a valid international phone number');
+  const result = validatePhone(value);
+  if (!result.valid) throw new Error(result.msg);
   return true;
 };
 

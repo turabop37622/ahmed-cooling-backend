@@ -38,7 +38,7 @@ if (!MONGODB_URI) {
 // ============================================
 // MODELS (Loaded after DB connect)
 // ============================================
-let Booking, User, Service, Notification, Product, Ad;
+let Booking, User, Service, Notification, Product;
 
 // ============================================
 // AUTH MIDDLEWARE
@@ -85,8 +85,7 @@ async function startServer() {
     User         = require('./models/User');
     Service      = require('./models/Service');
     Notification = require('./models/Notification');
-    Product      = require('./models/Products');   // ✅ NEW
-    Ad           = require('./models/Ad');         // ✅ NEW
+    Product      = require('./models/Products');
 
     console.log('✅ Models loaded successfully');
 
@@ -100,10 +99,9 @@ async function startServer() {
     // ============================================
     // SERVICE ROUTES
     // ============================================
-    app.get('/api/services', async (req, res) => {
-      const services = await Service.find({ active: true });
-      res.json({ success: true, data: services });
-    });
+    const serviceRoutes = require('./routes/services');
+    app.use('/api/services', serviceRoutes);
+    console.log('✅ Service routes loaded');
 
     // ============================================
     // BOOKING ROUTES
@@ -118,13 +116,6 @@ async function startServer() {
     const productRoutes = require('./routes/products');
     app.use('/api/products', productRoutes);
     console.log('✅ Product routes loaded');
-
-    // ============================================
-    // ✅ ADS ROUTES (post ad, my ads, admin)
-    // ============================================
-    const adRoutes = require('./routes/ads');
-    app.use('/api/ads', adRoutes);
-    console.log('✅ Ads routes loaded');
 
     console.log('✅ All routes loaded successfully\n');
 
@@ -154,14 +145,11 @@ async function startServer() {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
       console.log('════════════════════════════════════════════');
       console.log('📦 Available API endpoints:');
+      console.log(`   GET  /api/services`);
+      console.log(`   GET  /api/bookings/public`);
       console.log(`   GET  /api/products/categories`);
       console.log(`   GET  /api/products/brands?category=ac`);
       console.log(`   GET  /api/products/models?category=ac&brand=Daikin`);
-      console.log(`   POST /api/ads`);
-      console.log(`   GET  /api/ads/my-ads`);
-      console.log(`   GET  /api/ads/active`);
-      console.log(`   PUT  /api/ads/admin/:id/approve`);
-      console.log(`   PUT  /api/ads/admin/:id/reject`);
       console.log('════════════════════════════════════════════');
     });
 

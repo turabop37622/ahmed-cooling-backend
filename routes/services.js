@@ -1,8 +1,22 @@
 const express = require('express');
 const router = express.Router();
-const auth = require('../middleware/auth');
+const jwt = require('jsonwebtoken');
 const Service = require('../models/Service');
 const { body, validationResult } = require('express-validator');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token';
+
+const auth = (req, res, next) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    if (!token) return res.status(401).json({ success: false, error: 'No token provided' });
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    res.status(401).json({ success: false, error: 'Invalid token' });
+  }
+};
 
 // Get all services
 router.get('/', async (req, res) => {
