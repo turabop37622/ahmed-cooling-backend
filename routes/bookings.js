@@ -531,7 +531,6 @@ router.put('/public/cancel/:bookingId', async (req, res) => {
     const { reason, phone } = req.body;
     const booking = await Booking.findOne({ bookingId: req.params.bookingId });
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
-    if (phone && booking.phone !== phone) return res.status(403).json({ success: false, message: 'Phone does not match' });
     if (!['pending', 'confirmed'].includes(booking.status)) return res.status(400).json({ success: false, message: `Cannot cancel in ${booking.status} status` });
 
     booking.status = 'cancelled';
@@ -661,6 +660,7 @@ router.post('/public', [
 
 router.get('/public/:bookingId', async (req, res) => {
   try {
+    const { phone } = req.query;
     const booking = await Booking.findOne({ bookingId: req.params.bookingId });
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
     res.json({ success: true, data: { booking } });
@@ -669,8 +669,13 @@ router.get('/public/:bookingId', async (req, res) => {
   }
 });
 
-router.get('/phone/:phone', async (req, res) => {
+router.get('/phone/:phone', auth, async (req, res) => {
   try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(401).json({ success: false, message: 'Unauthorized' });
+    if (user.phone !== req.params.phone && user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'You can only view your own bookings' });
+    }
     const bookings = await Booking.find({ phone: req.params.phone }).sort({ createdAt: -1 });
     res.json({ success: true, data: { bookings } });
   } catch (error) {
