@@ -14,6 +14,13 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // ============================================
+// GOOGLE SEARCH CONSOLE VERIFICATION
+// ============================================
+app.get('/google2c7ef9c93df45db9.html', (req, res) => {
+  res.type('text/html').send('google-site-verification: google2c7ef9c93df45db9.html');
+});
+
+// ============================================
 // HOMEPAGE - with privacy policy link
 // ============================================
 app.get('/', (req, res) => {
