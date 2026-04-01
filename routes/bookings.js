@@ -832,7 +832,7 @@ router.put('/:id/status', auth, async (req, res) => {
     const booking = await Booking.findById(req.params.id);
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
 
-    const validTransitions = { pending: ['confirmed','cancelled'], confirmed: ['assigned','cancelled'], assigned: ['on_the_way','cancelled'], on_the_way: ['in_progress','cancelled'], in_progress: ['completed','cancelled'] };
+    const validTransitions = { pending: ['confirmed','cancelled'], confirmed: ['assigned','completed','cancelled'], assigned: ['on_the_way','completed','cancelled'], on_the_way: ['in_progress','completed'], in_progress: ['completed','cancelled'] };
     if (!validTransitions[booking.status]?.includes(status)) return res.status(400).json({ success: false, message: `Invalid transition: ${booking.status} → ${status}` });
 
     booking.status = status;
@@ -866,6 +866,25 @@ router.post('/:id/feedback', auth, async (req, res) => {
     }
 
     res.json({ success: true, message: 'Feedback submitted', booking });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
+router.post('/public/:bookingId/review', async (req, res) => {
+  try {
+    const { rating, comment } = req.body;
+    if (!rating || rating < 1 || rating > 5) return res.status(400).json({ success: false, message: 'Rating 1-5 required' });
+
+    const booking = await Booking.findOne({ bookingId: req.params.bookingId });
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (booking.status !== 'completed') return res.status(400).json({ success: false, message: 'Only completed bookings can be reviewed' });
+    if (booking.customerFeedback?.rating) return res.status(400).json({ success: false, message: 'Review already submitted' });
+
+    booking.customerFeedback = { rating: parseInt(rating), comment: comment || '', date: new Date() };
+    await booking.save();
+
+    res.json({ success: true, message: 'Review submitted! Thank you.', booking });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
