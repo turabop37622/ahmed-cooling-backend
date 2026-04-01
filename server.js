@@ -14,15 +14,221 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // ============================================
-// HEALTH CHECK - Render ke liye
+// HOMEPAGE - with privacy policy link
 // ============================================
 app.get('/', (req, res) => {
-  res.status(200).json({ status: 'ok' });
+  res.status(200).send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ahmed Cooling Workshop</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #333; }
+    .container { background: #fff; border-radius: 20px; padding: 50px 40px; max-width: 600px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.15); text-align: center; }
+    .logo { font-size: 48px; margin-bottom: 10px; }
+    h1 { font-size: 28px; color: #1a1a2e; margin-bottom: 8px; }
+    .tagline { color: #666; font-size: 16px; margin-bottom: 30px; }
+    .features { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px; text-align: left; }
+    .feature { background: #f8f9ff; padding: 15px; border-radius: 12px; }
+    .feature span { font-size: 22px; display: block; margin-bottom: 5px; }
+    .feature p { font-size: 13px; color: #555; }
+    .links { border-top: 1px solid #eee; padding-top: 20px; }
+    .links a { color: #667eea; text-decoration: none; margin: 0 12px; font-size: 14px; }
+    .links a:hover { text-decoration: underline; }
+    .contact { margin-top: 15px; font-size: 13px; color: #999; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">❄️</div>
+    <h1>Ahmed Cooling Workshop</h1>
+    <p class="tagline">Professional AC & Cooling Services at Your Doorstep</p>
+    <div class="features">
+      <div class="feature"><span>🔧</span><p>AC Installation & Repair</p></div>
+      <div class="feature"><span>📅</span><p>Easy Online Booking</p></div>
+      <div class="feature"><span>🚚</span><p>Home Service Available</p></div>
+      <div class="feature"><span>⭐</span><p>Expert Technicians</p></div>
+    </div>
+    <div class="links">
+      <a href="/privacy-policy">Privacy Policy</a>
+      <a href="/terms-of-service">Terms of Service</a>
+    </div>
+    <p class="contact">&copy; ${new Date().getFullYear()} Ahmed Cooling Workshop. All rights reserved.</p>
+  </div>
+</body>
+</html>`);
 });
 
 // ✅ RENDER HEALTH CHECK (VERY IMPORTANT)
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK' });
+});
+
+// ============================================
+// PRIVACY POLICY
+// ============================================
+app.get('/privacy-policy', (req, res) => {
+  res.status(200).send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - Ahmed Cooling Workshop</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; line-height: 1.7; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; padding: 40px 20px; text-align: center; }
+    .header h1 { font-size: 28px; margin-bottom: 5px; }
+    .header p { opacity: 0.85; font-size: 14px; }
+    .content { max-width: 800px; margin: 30px auto; padding: 40px; background: #fff; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+    h2 { color: #1a1a2e; margin: 25px 0 10px; font-size: 20px; border-left: 4px solid #667eea; padding-left: 12px; }
+    p, li { font-size: 15px; color: #555; margin-bottom: 10px; }
+    ul { padding-left: 20px; }
+    .footer { text-align: center; padding: 20px; font-size: 13px; color: #999; }
+    .footer a { color: #667eea; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Privacy Policy</h1>
+    <p>Ahmed Cooling Workshop &mdash; Last updated: April 1, 2026</p>
+  </div>
+  <div class="content">
+    <h2>1. Introduction</h2>
+    <p>Ahmed Cooling Workshop ("we", "our", or "us") operates the Ahmed Cooling mobile application. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our application.</p>
+
+    <h2>2. Information We Collect</h2>
+    <p>We may collect the following types of information:</p>
+    <ul>
+      <li><strong>Personal Information:</strong> Name, email address, phone number, and address when you create an account or place a booking.</li>
+      <li><strong>Authentication Data:</strong> We use Google Sign-In for authentication. When you sign in with Google, we receive your name, email, and profile picture from your Google account.</li>
+      <li><strong>Booking Information:</strong> Details about the services you book, including service type, date, time, location, and any notes you provide.</li>
+      <li><strong>Device Information:</strong> Device type, operating system, and app version for analytics and troubleshooting.</li>
+    </ul>
+
+    <h2>3. How We Use Your Information</h2>
+    <ul>
+      <li>To create and manage your account.</li>
+      <li>To process and manage your service bookings.</li>
+      <li>To send booking confirmations, updates, and notifications via email, SMS, or WhatsApp.</li>
+      <li>To improve our services and user experience.</li>
+      <li>To respond to your inquiries and provide customer support.</li>
+    </ul>
+
+    <h2>4. Google User Data</h2>
+    <p>When you sign in using Google, we access your basic profile information (name, email, and profile picture) solely for authentication and account creation. We do not access, store, or share any other Google user data such as contacts, calendar, drive files, or browsing history. Our use of Google user data complies with the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
+    <h2>5. Data Sharing</h2>
+    <p>We do not sell, trade, or rent your personal information to third parties. We may share information only in the following cases:</p>
+    <ul>
+      <li>With service technicians assigned to your booking (limited to information needed to complete the service).</li>
+      <li>With third-party service providers who assist in operating our app (e.g., cloud hosting, email/SMS services) under strict confidentiality agreements.</li>
+      <li>If required by law or to protect our legal rights.</li>
+    </ul>
+
+    <h2>6. Data Security</h2>
+    <p>We implement appropriate technical and organizational security measures to protect your personal data, including encrypted data transmission (HTTPS), secure password hashing, and JWT-based authentication tokens.</p>
+
+    <h2>7. Data Retention</h2>
+    <p>We retain your personal data for as long as your account is active or as needed to provide services. You may request deletion of your account and associated data at any time by contacting us.</p>
+
+    <h2>8. Your Rights</h2>
+    <ul>
+      <li>Access, update, or delete your personal information.</li>
+      <li>Opt out of promotional communications.</li>
+      <li>Request a copy of your data.</li>
+      <li>Withdraw consent for data processing at any time.</li>
+    </ul>
+
+    <h2>9. Children's Privacy</h2>
+    <p>Our service is not directed to individuals under the age of 13. We do not knowingly collect personal information from children.</p>
+
+    <h2>10. Changes to This Policy</h2>
+    <p>We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last updated" date.</p>
+
+    <h2>11. Contact Us</h2>
+    <p>If you have questions about this Privacy Policy, please contact us:</p>
+    <ul>
+      <li><strong>App:</strong> Ahmed Cooling Workshop</li>
+      <li><strong>Website:</strong> <a href="https://ahmed-cooling-backend.onrender.com">https://ahmed-cooling-backend.onrender.com</a></li>
+    </ul>
+  </div>
+  <div class="footer">
+    <p><a href="/">← Back to Home</a> &nbsp;|&nbsp; &copy; ${new Date().getFullYear()} Ahmed Cooling Workshop</p>
+  </div>
+</body>
+</html>`);
+});
+
+// ============================================
+// TERMS OF SERVICE
+// ============================================
+app.get('/terms-of-service', (req, res) => {
+  res.status(200).send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terms of Service - Ahmed Cooling Workshop</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; line-height: 1.7; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; padding: 40px 20px; text-align: center; }
+    .header h1 { font-size: 28px; margin-bottom: 5px; }
+    .header p { opacity: 0.85; font-size: 14px; }
+    .content { max-width: 800px; margin: 30px auto; padding: 40px; background: #fff; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+    h2 { color: #1a1a2e; margin: 25px 0 10px; font-size: 20px; border-left: 4px solid #667eea; padding-left: 12px; }
+    p, li { font-size: 15px; color: #555; margin-bottom: 10px; }
+    ul { padding-left: 20px; }
+    .footer { text-align: center; padding: 20px; font-size: 13px; color: #999; }
+    .footer a { color: #667eea; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Terms of Service</h1>
+    <p>Ahmed Cooling Workshop &mdash; Last updated: April 1, 2026</p>
+  </div>
+  <div class="content">
+    <h2>1. Acceptance of Terms</h2>
+    <p>By using the Ahmed Cooling Workshop application, you agree to be bound by these Terms of Service. If you do not agree, please do not use the application.</p>
+
+    <h2>2. Services</h2>
+    <p>Ahmed Cooling Workshop provides AC and cooling equipment installation, repair, and maintenance services. You can browse services, book appointments, and track service progress through our app.</p>
+
+    <h2>3. User Accounts</h2>
+    <p>You must provide accurate information when creating an account. You are responsible for maintaining the confidentiality of your account credentials and for all activities under your account.</p>
+
+    <h2>4. Bookings & Cancellations</h2>
+    <ul>
+      <li>Bookings are subject to availability and confirmation.</li>
+      <li>You may cancel a booking before the service is confirmed by the technician.</li>
+      <li>We reserve the right to cancel or reschedule bookings due to unforeseen circumstances.</li>
+    </ul>
+
+    <h2>5. User Responsibilities</h2>
+    <ul>
+      <li>Provide accurate booking details including address and contact information.</li>
+      <li>Ensure access to the premises for scheduled service visits.</li>
+      <li>Do not misuse the app or attempt to interfere with its operation.</li>
+    </ul>
+
+    <h2>6. Limitation of Liability</h2>
+    <p>Ahmed Cooling Workshop shall not be liable for any indirect, incidental, or consequential damages arising from the use of our services or application.</p>
+
+    <h2>7. Modifications</h2>
+    <p>We reserve the right to modify these terms at any time. Continued use of the app constitutes acceptance of updated terms.</p>
+
+    <h2>8. Contact</h2>
+    <p>For questions about these Terms, contact us through the app or visit our <a href="/">homepage</a>.</p>
+  </div>
+  <div class="footer">
+    <p><a href="/">← Back to Home</a> &nbsp;|&nbsp; &copy; ${new Date().getFullYear()} Ahmed Cooling Workshop</p>
+  </div>
+</body>
+</html>`);
 });
 
 // ============================================
