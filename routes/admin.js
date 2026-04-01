@@ -76,4 +76,18 @@ router.get('/users', async (req, res) => {
   }
 });
 
+router.get('/users/:userId/bookings', async (req, res) => {
+  try {
+    const userData = await User.findById(req.params.userId).select('phone email');
+    const conditions = [{ user: req.params.userId }];
+    if (userData?.phone) conditions.push({ phone: userData.phone });
+    if (userData?.email) conditions.push({ email: userData.email });
+
+    const bookings = await Booking.find({ $or: conditions }).sort({ createdAt: -1 });
+    res.json({ success: true, bookings });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 module.exports = router;
