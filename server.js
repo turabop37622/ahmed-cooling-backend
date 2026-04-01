@@ -117,6 +117,13 @@ async function startServer() {
     app.use('/api/products', productRoutes);
     console.log('✅ Product routes loaded');
 
+    // ============================================
+    // ADMIN ROUTES
+    // ============================================
+    const adminRoutes = require('./routes/admin');
+    app.use('/api/admin', adminRoutes);
+    console.log('✅ Admin routes loaded');
+
     console.log('✅ All routes loaded successfully\n');
 
     // ============================================
