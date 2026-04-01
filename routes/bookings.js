@@ -606,6 +606,54 @@ router.put('/public/cancel/:bookingId', async (req, res) => {
   }
 });
 
+// ✅ PUBLIC RESCHEDULE BOOKING
+router.put('/public/reschedule/:bookingId', async (req, res) => {
+  try {
+    const { date, time, scheduledDate, scheduledTime } = req.body;
+    const booking = await Booking.findOne({ bookingId: req.params.bookingId });
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (!['pending', 'confirmed'].includes(booking.status)) {
+      return res.status(400).json({ success: false, message: `Cannot reschedule in ${booking.status} status` });
+    }
+
+    booking.date = date || scheduledDate || booking.date;
+    booking.time = time || scheduledTime || booking.time;
+    booking.scheduledDate = scheduledDate || date || booking.scheduledDate;
+    booking.scheduledTime = scheduledTime || time || booking.scheduledTime;
+    booking.statusHistory.push({ status: booking.status, timestamp: new Date(), note: 'Rescheduled by customer' });
+    await booking.save();
+
+    console.log('✅ Public booking rescheduled:', req.params.bookingId);
+    res.json({ success: true, message: 'Booking rescheduled', data: { bookingId: booking.bookingId, date: booking.date, time: booking.time } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
+// ✅ AUTHENTICATED RESCHEDULE BOOKING
+router.put('/:id/reschedule', auth, async (req, res) => {
+  try {
+    const { date, time, scheduledDate, scheduledTime } = req.body;
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    if (!['pending', 'confirmed'].includes(booking.status)) {
+      return res.status(400).json({ success: false, message: `Cannot reschedule in ${booking.status} status` });
+    }
+
+    booking.date = date || scheduledDate || booking.date;
+    booking.time = time || scheduledTime || booking.time;
+    booking.scheduledDate = scheduledDate || date || booking.scheduledDate;
+    booking.scheduledTime = scheduledTime || time || booking.scheduledTime;
+    booking.statusHistory.push({ status: booking.status, timestamp: new Date(), note: 'Rescheduled by customer' });
+    await booking.save();
+
+    console.log('✅ Authenticated booking rescheduled:', req.params.id);
+    res.json({ success: true, message: 'Booking rescheduled', data: { bookingId: booking.bookingId || booking._id, date: booking.date, time: booking.time } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
 // ✅ PUBLIC BOOKING - User + Admin dono ko email
 router.post('/public', [
   body('customerName').trim().notEmpty().withMessage('Name required').isLength({ min: 2 }),
