@@ -59,8 +59,8 @@ app.get('/', (req, res) => {
       <div class="feature"><span>⭐</span><p>Expert Technicians</p></div>
     </div>
     <div class="links">
-      <a href="/privacy-policy">Privacy Policy</a>
-      <a href="/terms-of-service">Terms of Service</a>
+      <a href="https://ahmed-cooling-backend.onrender.com/privacy-policy">Privacy Policy</a>
+      <a href="https://ahmed-cooling-backend.onrender.com/terms-of-service">Terms of Service</a>
     </div>
     <p class="contact">&copy; ${new Date().getFullYear()} Ahmed Cooling Workshop. All rights reserved.</p>
   </div>
