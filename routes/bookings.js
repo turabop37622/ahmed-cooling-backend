@@ -514,6 +514,36 @@ const adminPage = (title, color, bg, message) => `
 `;
 
 // ============================================
+// PUBLIC REVIEWS — for HomeScreen
+// ============================================
+router.get('/public/reviews', async (req, res) => {
+  try {
+    const bookings = await Booking.find({ 'customerFeedback.rating': { $exists: true, $gte: 1 } })
+      .select('customerName customerFeedback createdAt address')
+      .sort({ 'customerFeedback.date': -1 })
+      .limit(10);
+    const reviews = bookings.map(b => ({
+      name: b.customerName || 'Customer',
+      city: b.address ? b.address.split(',').pop()?.trim() || '' : '',
+      rating: b.customerFeedback.rating,
+      text: b.customerFeedback.comment || '',
+      timeAgo: getTimeAgo(b.customerFeedback.date),
+    }));
+    res.json({ success: true, reviews });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+function getTimeAgo(date) {
+  if (!date) return '';
+  const m = Math.floor((Date.now() - new Date(date)) / 60000);
+  if (m < 60) return `${m}m ago`;
+  if (m < 1440) return `${Math.floor(m / 60)}h ago`;
+  return `${Math.floor(m / 1440)}d ago`;
+}
+
+// ============================================
 // DEBUG MIDDLEWARE
 // ============================================
 router.use((req, res, next) => {
@@ -836,9 +866,20 @@ router.put('/:id/status', auth, async (req, res) => {
     if (!validTransitions[booking.status]?.includes(status)) return res.status(400).json({ success: false, message: `Invalid transition: ${booking.status} → ${status}` });
 
     booking.status = status;
+    booking.statusHistory.push({ status, timestamp: new Date(), note: notes || `Updated by ${req.user.role}` });
     if (notes) booking.technicianNotes = notes;
     if (req.user.role === 'technician' && !booking.technician) booking.technician = req.user.id;
     await booking.save();
+
+    if (status === 'confirmed' && booking.email) {
+      const serviceData = typeof booking.service === 'object' ? booking.service : {};
+      sendBookingConfirmedEmail(booking.email, {
+        bookingId: booking.bookingId, orderNumber: booking.orderNumber,
+        customerName: booking.customerName, serviceName: serviceData.name || booking.serviceDetails?.name || 'Service',
+        serviceIcon: serviceData.icon || '❄️', date: booking.date, time: booking.time,
+        address: booking.address, totalAmount: booking.totalAmount,
+      });
+    }
 
     if (booking.user) await new Notification({ user: booking.user, type: 'booking', title: `Booking ${status}`, message: `Your booking #${booking.orderNumber} is now ${status}.`, data: { bookingId: booking._id, status } }).save();
 
