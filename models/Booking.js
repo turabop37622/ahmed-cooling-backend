@@ -198,7 +198,7 @@
       },
       language: {
         type: String,
-        enum: ['en', 'ur'],
+        enum: ['en', 'ur', 'ar'],
         default: 'en'
       },
       
