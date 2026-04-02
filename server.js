@@ -42,6 +42,9 @@ app.get('/', (req, res) => {
     .hero h1 { font-size: 32px; margin-bottom: 10px; }
     .hero p { font-size: 18px; opacity: 0.9; max-width: 600px; margin: 0 auto; }
     .content { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+    .policy-banner { background: #eef2ff; border: 1px solid #c7d2fe; color: #312e81; padding: 16px 18px; border-radius: 12px; margin: -20px auto 30px; max-width: 800px; text-align: center; }
+    .policy-banner strong { display: block; font-size: 16px; margin-bottom: 6px; }
+    .policy-banner a { color: #4338ca; font-weight: 700; text-decoration: underline; }
     h2 { color: #1a1a2e; margin: 30px 0 15px; font-size: 22px; border-left: 4px solid #667eea; padding-left: 12px; }
     p, li { font-size: 15px; color: #555; margin-bottom: 10px; }
     ul { padding-left: 20px; margin-bottom: 15px; }
@@ -57,13 +60,20 @@ app.get('/', (req, res) => {
 <body>
   <nav>
     <span class="brand">Ahmed Cooling Workshop</span>
-    <a href="https://ahmed-cooling-backend.onrender.com/privacy-policy" target="_blank">Privacy Policy</a>
+    <a href="/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
   </nav>
   <div class="hero">
     <h1>Ahmed Cooling Workshop</h1>
     <p>Professional AC &amp; Cooling Installation, Repair, and Maintenance Services at Your Doorstep</p>
   </div>
   <div class="content">
+    <div class="policy-banner">
+      <strong>Privacy Policy</strong>
+      <p>This homepage includes a direct link to our privacy policy for users and reviewers.</p>
+      <a href="/privacy-policy" target="_blank" rel="noopener noreferrer">Open Privacy Policy</a>
+      <p>Direct URL: https://ahmed-cooling-backend.onrender.com/privacy-policy</p>
+    </div>
+
     <h2>About Our App</h2>
     <p>Ahmed Cooling Workshop is a mobile application that connects customers with professional AC and cooling service technicians. Our app allows users to browse available services, book appointments for AC installation, repair, and maintenance, track service progress in real-time, and leave reviews after service completion.</p>
 
@@ -86,11 +96,12 @@ app.get('/', (req, res) => {
 
     <h2>Privacy Policy</h2>
     <p>For complete details on how we collect, use, and protect your data, please read our full privacy policy:</p>
-    <p><a href="https://ahmed-cooling-backend.onrender.com/privacy-policy" target="_blank">https://ahmed-cooling-backend.onrender.com/privacy-policy</a></p>
+    <p><a href="/privacy-policy" target="_blank" rel="noopener noreferrer">Open the Privacy Policy page</a></p>
+    <p><a href="https://ahmed-cooling-backend.onrender.com/privacy-policy" target="_blank" rel="noopener noreferrer">https://ahmed-cooling-backend.onrender.com/privacy-policy</a></p>
   </div>
   <footer>
-    <a href="https://ahmed-cooling-backend.onrender.com/privacy-policy" target="_blank">Privacy Policy</a>
-    <a href="https://ahmed-cooling-backend.onrender.com/terms-of-service" target="_blank">Terms of Service</a>
+    <a href="/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>
+    <a href="/terms-of-service" target="_blank" rel="noopener noreferrer">Terms of Service</a>
     <p>&copy; ${new Date().getFullYear()} Ahmed Cooling Workshop. All rights reserved.</p>
   </footer>
 </body>
