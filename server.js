@@ -29,40 +29,65 @@ app.get('/', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ahmed Cooling Workshop</title>
+  <title>Ahmed Cooling Workshop - Professional AC & Cooling Services</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #333; }
-    .container { background: #fff; border-radius: 20px; padding: 50px 40px; max-width: 600px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.15); text-align: center; }
-    .logo { font-size: 48px; margin-bottom: 10px; }
-    h1 { font-size: 28px; color: #1a1a2e; margin-bottom: 8px; }
-    .tagline { color: #666; font-size: 16px; margin-bottom: 30px; }
-    .features { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px; text-align: left; }
-    .feature { background: #f8f9ff; padding: 15px; border-radius: 12px; }
-    .feature span { font-size: 22px; display: block; margin-bottom: 5px; }
-    .feature p { font-size: 13px; color: #555; }
-    .links { border-top: 1px solid #eee; padding-top: 20px; }
-    .links a { color: #667eea; text-decoration: none; margin: 0 12px; font-size: 14px; }
-    .links a:hover { text-decoration: underline; }
-    .contact { margin-top: 15px; font-size: 13px; color: #999; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; line-height: 1.7; }
+    .hero { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; padding: 50px 20px; text-align: center; }
+    .hero h1 { font-size: 32px; margin-bottom: 10px; }
+    .hero p { font-size: 18px; opacity: 0.9; max-width: 600px; margin: 0 auto; }
+    .content { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+    h2 { color: #1a1a2e; margin: 30px 0 15px; font-size: 22px; border-left: 4px solid #667eea; padding-left: 12px; }
+    p, li { font-size: 15px; color: #555; margin-bottom: 10px; }
+    ul { padding-left: 20px; margin-bottom: 15px; }
+    .features { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 20px 0 30px; }
+    .feature { background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
+    .feature strong { display: block; margin-bottom: 5px; color: #1a1a2e; }
+    .feature p { font-size: 13px; margin: 0; }
+    .policy-box { background: #fff; border: 2px solid #667eea; border-radius: 12px; padding: 25px; margin: 30px 0; text-align: center; }
+    .policy-box p { font-size: 15px; color: #555; margin-bottom: 15px; }
+    .policy-box a { display: inline-block; background: #667eea; color: #fff; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; margin: 5px 10px; }
+    .policy-box a:hover { background: #5a6fd6; }
+    .policy-box a.secondary { background: #fff; color: #667eea; border: 2px solid #667eea; }
+    .footer { text-align: center; padding: 20px; font-size: 13px; color: #999; border-top: 1px solid #eee; margin-top: 20px; }
+    .footer a { color: #667eea; text-decoration: none; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="logo">❄️</div>
+  <div class="hero">
     <h1>Ahmed Cooling Workshop</h1>
-    <p class="tagline">Professional AC & Cooling Services at Your Doorstep</p>
+    <p>Professional AC &amp; Cooling Installation, Repair, and Maintenance Services at Your Doorstep</p>
+  </div>
+  <div class="content">
+    <h2>About Our App</h2>
+    <p>Ahmed Cooling Workshop is a mobile application that connects customers with professional AC and cooling service technicians. Our app allows users to browse available services, book appointments for AC installation, repair, and maintenance, track service progress in real-time, and leave reviews after service completion.</p>
+
+    <h2>Our Services</h2>
     <div class="features">
-      <div class="feature"><span>🔧</span><p>AC Installation & Repair</p></div>
-      <div class="feature"><span>📅</span><p>Easy Online Booking</p></div>
-      <div class="feature"><span>🚚</span><p>Home Service Available</p></div>
-      <div class="feature"><span>⭐</span><p>Expert Technicians</p></div>
+      <div class="feature"><strong>AC Installation</strong><p>Professional installation of all AC brands and models at your home or office.</p></div>
+      <div class="feature"><strong>AC Repair</strong><p>Expert diagnosis and repair of AC units, including gas refilling and part replacement.</p></div>
+      <div class="feature"><strong>Maintenance</strong><p>Regular servicing and preventive maintenance to keep your AC running efficiently.</p></div>
+      <div class="feature"><strong>Online Booking</strong><p>Easy appointment scheduling through our mobile app with real-time tracking.</p></div>
     </div>
-    <div class="links">
+
+    <h2>How We Use Your Data</h2>
+    <p>Ahmed Cooling Workshop uses Google Sign-In to provide a simple and secure login experience. When you sign in with your Google account, we only access your basic profile information (name, email address, and profile picture) for the following purposes:</p>
+    <ul>
+      <li><strong>Account Creation &amp; Authentication:</strong> To create and manage your user account securely.</li>
+      <li><strong>Booking Management:</strong> To associate your service bookings with your account and send you booking confirmations and updates.</li>
+      <li><strong>Communication:</strong> To send you service-related notifications, booking reminders, and support responses via email.</li>
+    </ul>
+    <p>We do not access your Google contacts, calendar, drive, or any other Google data beyond basic profile information. We do not sell or share your personal data with third parties for advertising purposes. For complete details, please read our Privacy Policy linked below.</p>
+
+    <div class="policy-box">
+      <p>Please review our Privacy Policy and Terms of Service for complete details on how we handle your data.</p>
       <a href="https://ahmed-cooling-backend.onrender.com/privacy-policy">Privacy Policy</a>
-      <a href="https://ahmed-cooling-backend.onrender.com/terms-of-service">Terms of Service</a>
+      <a href="https://ahmed-cooling-backend.onrender.com/terms-of-service" class="secondary">Terms of Service</a>
     </div>
-    <p class="contact">&copy; ${new Date().getFullYear()} Ahmed Cooling Workshop. All rights reserved.</p>
+  </div>
+  <div class="footer">
+    <p>&copy; ${new Date().getFullYear()} Ahmed Cooling Workshop. All rights reserved.</p>
+    <p style="margin-top:8px;"><a href="https://ahmed-cooling-backend.onrender.com/privacy-policy">Privacy Policy</a> &nbsp;|&nbsp; <a href="https://ahmed-cooling-backend.onrender.com/terms-of-service">Terms of Service</a></p>
   </div>
 </body>
 </html>`);
