@@ -57,7 +57,7 @@ app.get('/', (req, res) => {
 <body>
   <nav>
     <span class="brand">Ahmed Cooling Workshop</span>
-    <a href="https://ahmed-cooling-backend.onrender.com/privacy-policy">Privacy Policy</a>
+    <a href="https://ahmed-cooling-backend.onrender.com/privacy-policy" target="_blank">Privacy Policy</a>
   </nav>
   <div class="hero">
     <h1>Ahmed Cooling Workshop</h1>
@@ -86,11 +86,11 @@ app.get('/', (req, res) => {
 
     <h2>Privacy Policy</h2>
     <p>For complete details on how we collect, use, and protect your data, please read our full privacy policy:</p>
-    <p><a href="https://ahmed-cooling-backend.onrender.com/privacy-policy">https://ahmed-cooling-backend.onrender.com/privacy-policy</a></p>
+    <p><a href="https://ahmed-cooling-backend.onrender.com/privacy-policy" target="_blank">https://ahmed-cooling-backend.onrender.com/privacy-policy</a></p>
   </div>
   <footer>
-    <a href="https://ahmed-cooling-backend.onrender.com/privacy-policy">Privacy Policy</a>
-    <a href="https://ahmed-cooling-backend.onrender.com/terms-of-service">Terms of Service</a>
+    <a href="https://ahmed-cooling-backend.onrender.com/privacy-policy" target="_blank">Privacy Policy</a>
+    <a href="https://ahmed-cooling-backend.onrender.com/terms-of-service" target="_blank">Terms of Service</a>
     <p>&copy; ${new Date().getFullYear()} Ahmed Cooling Workshop. All rights reserved.</p>
   </footer>
 </body>
