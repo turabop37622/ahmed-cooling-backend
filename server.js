@@ -24,15 +24,20 @@ app.get('/google2c7ef9c93df45db9.html', (req, res) => {
 // HOMEPAGE - with privacy policy link
 // ============================================
 app.get('/', (req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
   res.status(200).send(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ahmed Cooling Workshop - Professional AC & Cooling Services</title>
+  <link rel="privacy-policy" href="https://ahmed-cooling-backend.onrender.com/privacy-policy">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; color: #333; line-height: 1.7; }
+    nav { background: #fff; padding: 15px 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+    nav .brand { font-size: 18px; font-weight: 800; color: #1a1a2e; }
+    nav a { color: #667eea; text-decoration: underline; font-size: 14px; font-weight: 600; }
     .hero { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; padding: 50px 20px; text-align: center; }
     .hero h1 { font-size: 32px; margin-bottom: 10px; }
     .hero p { font-size: 18px; opacity: 0.9; max-width: 600px; margin: 0 auto; }
@@ -44,16 +49,16 @@ app.get('/', (req, res) => {
     .feature { background: #fff; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.06); }
     .feature strong { display: block; margin-bottom: 5px; color: #1a1a2e; }
     .feature p { font-size: 13px; margin: 0; }
-    .policy-box { background: #fff; border: 2px solid #667eea; border-radius: 12px; padding: 25px; margin: 30px 0; text-align: center; }
-    .policy-box p { font-size: 15px; color: #555; margin-bottom: 15px; }
-    .policy-box a { display: inline-block; background: #667eea; color: #fff; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; margin: 5px 10px; }
-    .policy-box a:hover { background: #5a6fd6; }
-    .policy-box a.secondary { background: #fff; color: #667eea; border: 2px solid #667eea; }
-    .footer { text-align: center; padding: 20px; font-size: 13px; color: #999; border-top: 1px solid #eee; margin-top: 20px; }
-    .footer a { color: #667eea; text-decoration: none; }
+    footer { background: #1a1a2e; color: #ccc; padding: 30px 20px; text-align: center; margin-top: 40px; }
+    footer a { color: #93a3f8; text-decoration: underline; font-size: 15px; margin: 0 15px; }
+    footer p { font-size: 13px; color: #888; margin-top: 15px; }
   </style>
 </head>
 <body>
+  <nav>
+    <span class="brand">Ahmed Cooling Workshop</span>
+    <a href="https://ahmed-cooling-backend.onrender.com/privacy-policy">Privacy Policy</a>
+  </nav>
   <div class="hero">
     <h1>Ahmed Cooling Workshop</h1>
     <p>Professional AC &amp; Cooling Installation, Repair, and Maintenance Services at Your Doorstep</p>
@@ -77,18 +82,17 @@ app.get('/', (req, res) => {
       <li><strong>Booking Management:</strong> To associate your service bookings with your account and send you booking confirmations and updates.</li>
       <li><strong>Communication:</strong> To send you service-related notifications, booking reminders, and support responses via email.</li>
     </ul>
-    <p>We do not access your Google contacts, calendar, drive, or any other Google data beyond basic profile information. We do not sell or share your personal data with third parties for advertising purposes. For complete details, please read our Privacy Policy linked below.</p>
+    <p>We do not access your Google contacts, calendar, drive, or any other Google data beyond basic profile information. We do not sell or share your personal data with third parties for advertising purposes.</p>
 
-    <div class="policy-box">
-      <p>Please review our Privacy Policy and Terms of Service for complete details on how we handle your data.</p>
-      <a href="https://ahmed-cooling-backend.onrender.com/privacy-policy">Privacy Policy</a>
-      <a href="https://ahmed-cooling-backend.onrender.com/terms-of-service" class="secondary">Terms of Service</a>
-    </div>
+    <h2>Privacy Policy</h2>
+    <p>For complete details on how we collect, use, and protect your data, please read our full privacy policy:</p>
+    <p><a href="https://ahmed-cooling-backend.onrender.com/privacy-policy">https://ahmed-cooling-backend.onrender.com/privacy-policy</a></p>
   </div>
-  <div class="footer">
+  <footer>
+    <a href="https://ahmed-cooling-backend.onrender.com/privacy-policy">Privacy Policy</a>
+    <a href="https://ahmed-cooling-backend.onrender.com/terms-of-service">Terms of Service</a>
     <p>&copy; ${new Date().getFullYear()} Ahmed Cooling Workshop. All rights reserved.</p>
-    <p style="margin-top:8px;"><a href="https://ahmed-cooling-backend.onrender.com/privacy-policy">Privacy Policy</a> &nbsp;|&nbsp; <a href="https://ahmed-cooling-backend.onrender.com/terms-of-service">Terms of Service</a></p>
-  </div>
+  </footer>
 </body>
 </html>`);
 });
