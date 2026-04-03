@@ -518,7 +518,7 @@ const adminPage = (title, color, bg, message) => `
 // ============================================
 router.get('/public/reviews', async (req, res) => {
   try {
-    const bookings = await Booking.find({ 'customerFeedback.rating': { $exists: true, $gte: 1 } })
+    const bookings = await Booking.find({ 'customerFeedback.rating': { $exists: true, $gte: 1 }, 'customerFeedback.approved': true })
       .select('customerName customerFeedback createdAt address')
       .sort({ 'customerFeedback.date': -1 })
       .limit(10);
@@ -530,6 +530,44 @@ router.get('/public/reviews', async (req, res) => {
       timeAgo: getTimeAgo(b.customerFeedback.date),
     }));
     res.json({ success: true, reviews });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ ADMIN: Get all pending reviews
+router.get('/admin/reviews', auth, async (req, res) => {
+  try {
+    const bookings = await Booking.find({ 'customerFeedback.rating': { $exists: true, $gte: 1 } })
+      .select('customerName customerFeedback createdAt address bookingId service serviceDetails')
+      .sort({ 'customerFeedback.date': -1 });
+    const reviews = bookings.map(b => ({
+      _id: b._id,
+      bookingId: b.bookingId,
+      customerName: b.customerName || 'Customer',
+      serviceName: b.serviceDetails?.name || b.service?.name || 'Service',
+      rating: b.customerFeedback.rating,
+      comment: b.customerFeedback.comment || '',
+      date: b.customerFeedback.date,
+      approved: b.customerFeedback.approved || false,
+    }));
+    res.json({ success: true, reviews });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ✅ ADMIN: Approve/Reject review
+router.put('/admin/reviews/:id/approve', auth, async (req, res) => {
+  try {
+    const { approved } = req.body;
+    const booking = await Booking.findById(req.params.id);
+    if (!booking || !booking.customerFeedback?.rating) {
+      return res.status(404).json({ success: false, message: 'Review not found' });
+    }
+    booking.customerFeedback.approved = approved !== false;
+    await booking.save();
+    res.json({ success: true, message: approved !== false ? 'Review approved' : 'Review rejected' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

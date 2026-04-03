@@ -172,7 +172,8 @@
       customerFeedback: {
         rating: { type: Number, min: 1, max: 5 },
         comment: String,
-        date: Date
+        date: Date,
+        approved: { type: Boolean, default: false }
       },
       cancellationReason: {
         type: String
