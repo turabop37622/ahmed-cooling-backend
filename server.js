@@ -30,7 +30,8 @@ app.get('/', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ahmed Cooling Workshop - Professional AC & Cooling Services</title>
+  <meta name="robots" content="noindex, nofollow">
+  <title>Ahmed Cooling Workshop - API</title>
   <link rel="privacy-policy" href="https://ahmed-cooling-backend.onrender.com/privacy-policy">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
