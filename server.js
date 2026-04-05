@@ -3,15 +3,69 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 
 // ============================================
-// MIDDLEWARE
+// SECURITY MIDDLEWARE
 // ============================================
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
+
+const allowedOrigins = [
+  'https://ahmedcoolingworkshop.com',
+  'https://www.ahmedcoolingworkshop.com',
+  'https://ahmed-cooling-web.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:8081',
+  'http://localhost:19006',
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    callback(null, true);
+  },
+  credentials: true,
+}));
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { success: false, message: 'Too many attempts. Please try again after 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const otpLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 5,
+  message: { success: false, message: 'Too many OTP attempts. Please try again after 5 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const generalLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+app.use('/api/auth/phone/login', authLimiter);
+app.use('/api/auth/phone/register', authLimiter);
+app.use('/api/auth/verify-otp', otpLimiter);
+app.use('/api/auth/forgot-password', authLimiter);
+app.use('/api', generalLimiter);
+
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ limit: '5mb', extended: true }));
 
 // ============================================
 // GOOGLE SEARCH CONSOLE VERIFICATION
@@ -386,7 +440,7 @@ async function startServer() {
 
     app.use((err, req, res, next) => {
       console.error('🔴 Server Error:', err);
-      res.status(500).json({ success: false, message: err.message });
+      res.status(500).json({ success: false, message: 'Internal server error' });
     });
 
     app.use((req, res) => {

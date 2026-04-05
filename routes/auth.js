@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { body, validationResult } = require('express-validator');
 
-const JWT_SECRET = process.env.JWT_SECRET || "mysecretkey";
+const JWT_SECRET = process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token';
 
 const generateToken = (user) => {
   return jwt.sign(
@@ -100,7 +100,7 @@ router.post('/register', [
     });
 
     await user.save();
-    console.log('✅ User saved. OTP:', otp);
+    console.log('✅ User saved');
 
     let otpSentVia = 'console';
 
@@ -154,7 +154,7 @@ router.post('/verify-otp', async (req, res) => {
   try {
     const { email, phone, otp } = req.body;
     const identifier = email || phone;
-    console.log('🔍 Verifying OTP for:', identifier, 'OTP:', otp);
+    console.log('🔍 Verifying OTP for:', identifier);
 
     const user = email
       ? await User.findOne({ email })
@@ -332,7 +332,7 @@ router.post('/phone/register', async (req, res) => {
       await user.save();
     }
 
-    console.log('✅ Phone user saved, OTP:', otp);
+    console.log('✅ Phone user saved');
 
     try {
       await sendEmail(email, otp);
@@ -468,7 +468,7 @@ router.post('/forgot-password', async (req, res) => {
     user.otp        = otp;
     user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
-    console.log('✅ Reset OTP generated:', otp);
+    console.log('✅ Reset OTP generated');
 
     try {
       await sendEmail(email, otp);

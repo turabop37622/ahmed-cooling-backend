@@ -538,6 +538,7 @@ router.get('/public/reviews', async (req, res) => {
 // ✅ ADMIN: Get all pending reviews
 router.get('/admin/reviews', auth, async (req, res) => {
   try {
+    if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only' });
     const bookings = await Booking.find({ 'customerFeedback.rating': { $exists: true, $gte: 1 } })
       .select('customerName customerFeedback createdAt address bookingId service serviceDetails')
       .sort({ 'customerFeedback.date': -1 });
@@ -553,13 +554,14 @@ router.get('/admin/reviews', auth, async (req, res) => {
     }));
     res.json({ success: true, reviews });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
 // ✅ ADMIN: Approve/Reject review
 router.put('/admin/reviews/:id/approve', auth, async (req, res) => {
   try {
+    if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only' });
     const { approved } = req.body;
     const booking = await Booking.findById(req.params.id);
     if (!booking || !booking.customerFeedback?.rating) {

@@ -205,7 +205,8 @@ router.delete('/:id', auth, async (req, res) => {
 // Search services
 router.get('/search/:query', async (req, res) => {
   try {
-    const query = req.params.query;
+    const raw = req.params.query;
+    const query = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     
     const services = await Service.find({
       active: true,

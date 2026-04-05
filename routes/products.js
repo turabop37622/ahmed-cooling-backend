@@ -2,9 +2,22 @@
 
 const express    = require('express');
 const router     = express.Router();
+const jwt        = require('jsonwebtoken');
 const Product    = require('../models/Products');
 const cloudinary = require('../utils/cloudinary');
 const upload     = require('../utils/multer');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token';
+const adminAuth = (req, res, next) => {
+  try {
+    const token = req.header('Authorization')?.replace('Bearer ', '');
+    if (!token) return res.status(401).json({ success: false, message: 'No token' });
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (decoded.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only' });
+    req.user = decoded;
+    next();
+  } catch { res.status(401).json({ success: false, message: 'Invalid token' }); }
+};
 
 // ── GET /api/products/categories ────────────────────────────
 router.get('/categories', async (req, res) => {
@@ -65,7 +78,7 @@ router.get('/all', async (req, res) => {
 });
 
 // ── POST /api/products/add ───────────────────────────────────
-router.post('/add', upload.single('image'), async (req, res) => {
+router.post('/add', adminAuth, upload.single('image'), async (req, res) => {
   try {
     const { categoryId, brand, model, type, variants } = req.body;
 
@@ -105,7 +118,7 @@ router.post('/add', upload.single('image'), async (req, res) => {
 });
 
 // ── PUT /api/products/:id/image ──────────────────────────────
-router.put('/:id/image', upload.single('image'), async (req, res) => {
+router.put('/:id/image', adminAuth, upload.single('image'), async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) {
@@ -138,7 +151,7 @@ router.put('/:id/image', upload.single('image'), async (req, res) => {
 });
 
 // ── DELETE /api/products/:id ─────────────────────────────────
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', adminAuth, async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) {
