@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const axios = require('axios');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
@@ -431,6 +432,25 @@ async function startServer() {
     const adminRoutes = require('./routes/admin');
     app.use('/api/admin', adminRoutes);
     console.log('✅ Admin routes loaded');
+
+    // ============================================
+    // GEOCODE PROXY (keeps Google API key server-side)
+    // ============================================
+    const GOOGLE_GEOCODE_KEY = process.env.GOOGLE_GEOCODE_KEY || 'AIzaSyCGL7csbANxIqisnCIeT4gPAVXaGQSgzug';
+    app.get('/api/geocode/reverse', async (req, res) => {
+      try {
+        const { lat, lng, lang } = req.query;
+        if (!lat || !lng) return res.status(400).json({ success: false, message: 'lat and lng required' });
+        const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&language=${lang || 'en'}&key=${GOOGLE_GEOCODE_KEY}`;
+        const gRes = await axios.get(url, { timeout: 8000 });
+        if (gRes.data?.status === 'OK' && gRes.data.results?.length) {
+          return res.json({ success: true, address: gRes.data.results[0].formatted_address });
+        }
+        return res.json({ success: false, message: 'No results' });
+      } catch {
+        return res.json({ success: false, message: 'Geocode failed' });
+      }
+    });
 
     console.log('✅ All routes loaded successfully\n');
 
