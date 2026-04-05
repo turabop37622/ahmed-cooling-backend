@@ -975,6 +975,54 @@ router.put('/:id/status', auth, async (req, res) => {
   }
 });
 
+// Admin reports an issue with booking (invalid phone, address, etc.) — notifies user
+router.put('/:id/report-issue', auth, async (req, res) => {
+  try {
+    if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only' });
+    const { issueType, message } = req.body;
+    if (!issueType) return res.status(400).json({ success: false, message: 'Issue type required' });
+
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+
+    const issueMessages = {
+      invalid_phone: 'Your phone number appears to be invalid. Please update it.',
+      invalid_address: 'Your address is incomplete or invalid. Please provide a correct address.',
+      incomplete_info: 'Your booking information is incomplete. Please update your details.',
+      other: message || 'There is an issue with your booking. Please contact support.',
+    };
+
+    const issueLabels = {
+      invalid_phone: 'Invalid Phone Number',
+      invalid_address: 'Invalid Address',
+      incomplete_info: 'Incomplete Information',
+      other: 'Booking Issue',
+    };
+
+    booking.statusHistory.push({
+      status: 'issue_reported',
+      timestamp: new Date(),
+      note: `Admin reported: ${issueLabels[issueType] || issueType}${message ? ' - ' + message : ''}`,
+    });
+    await booking.save();
+
+    if (booking.user) {
+      await new Notification({
+        user: booking.user,
+        type: 'alert',
+        title: issueLabels[issueType] || 'Booking Issue',
+        message: message || issueMessages[issueType] || issueMessages.other,
+        data: { bookingId: booking._id, orderNumber: booking.orderNumber, issueType },
+        priority: 'high',
+      }).save();
+    }
+
+    res.json({ success: true, message: 'Issue reported and user notified' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
 router.post('/:id/feedback', auth, async (req, res) => {
   try {
     const { rating, comment } = req.body;
