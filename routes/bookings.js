@@ -99,7 +99,7 @@ const sendBookingReceivedEmail = async (toEmail, data) => {
             <div style="background:#F9FAFB;border-radius:10px;padding:16px;margin-bottom:20px;">
               <p style="font-size:14px;font-weight:bold;color:#374151;margin:0 0 10px;">💰 Price Summary</p>
               <div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="font-size:13px;color:#6B7280;">Service Charge</span><span style="font-size:13px;">Rs. ${servicePrice || 0}</span></div>
-              <div style="display:flex;justify-content:space-between;margin-bottom:10px;"><span style="font-size:13px;color:#6B7280;">Visit Fee</span><span style="font-size:13px;">Rs. ${visitCharges || 200}</span></div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:10px;"><span style="font-size:13px;color:#6B7280;">Visit Fee</span><span style="font-size:13px;">Rs. ${visitCharges || 50}</span></div>
               <div style="border-top:1px solid #E5E7EB;padding-top:10px;display:flex;justify-content:space-between;"><span style="font-size:15px;font-weight:bold;">Total</span><span style="font-size:18px;font-weight:bold;color:#3B82F6;">Rs. ${totalAmount}</span></div>
             </div>
             <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:12px 16px;">
@@ -353,7 +353,7 @@ const sendAdminNotificationEmail = async (data) => {
             <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:16px;margin-bottom:28px;">
               <h3 style="color:#065F46;font-size:14px;margin:0 0 10px;">💰 Price Summary</h3>
               <div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="font-size:13px;color:#374151;">Service Charge</span><span style="font-size:13px;">Rs. ${servicePrice || 0}</span></div>
-              <div style="display:flex;justify-content:space-between;margin-bottom:10px;"><span style="font-size:13px;color:#374151;">Visit Fee</span><span style="font-size:13px;">Rs. ${visitCharges || 200}</span></div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:10px;"><span style="font-size:13px;color:#374151;">Visit Fee</span><span style="font-size:13px;">Rs. ${visitCharges || 50}</span></div>
               <div style="border-top:1px solid #BBF7D0;padding-top:10px;display:flex;justify-content:space-between;">
                 <span style="font-size:15px;font-weight:bold;color:#065F46;">Total Amount</span>
                 <span style="font-size:20px;font-weight:bold;color:#059669;">Rs. ${totalAmount}</span>
@@ -723,7 +723,7 @@ router.post('/public', [
     const bookingId   = `BK${Date.now()}`;
     const orderNumber = `ORD-${new Date().toISOString().split('T')[0].replace(/-/g,'')}-${Math.floor(Math.random()*10000)}`;
     const servicePrice  = service.basePrice || 0;
-    const visitCharges  = 200;
+    const visitCharges  = 50;
     const totalAmount   = servicePrice + visitCharges;
     const finalEmail    = email || userEmail || '';
 
@@ -867,8 +867,8 @@ router.post('/', auth, [
       serviceIcon: service.icon || '❄️',
       date: scheduledDate, time: scheduledTime, address,
       servicePrice: service.basePrice,
-      visitCharges: 200,
-      totalAmount: service.basePrice + 200,
+      visitCharges: 50,
+      totalAmount: service.basePrice + 50,
     });
 
     res.status(201).json({ success: true, message: 'Booking created', booking });
