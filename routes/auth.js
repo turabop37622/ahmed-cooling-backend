@@ -50,7 +50,8 @@ const DISPOSABLE_EMAIL_DOMAINS = [
   'tempmail.com', 'mailinator.com', 'guerrillamail.com', 'yopmail.com', '10minutemail.com',
   'trashmail.com', 'temp-mail.org', 'dispostable.com', 'getnada.com', 'dropmail.me',
   'guerrillamail.biz', 'guerrillamail.de', 'guerrillamail.net', 'guerrillamail.org',
-  'guerrillamailblock.com', 'spam4.me', 'grr.la', 'teleworm.us', 'dayrep.com', 'fleeing.cc'
+  'guerrillamailblock.com', 'spam4.me', 'grr.la', 'teleworm.us', 'dayrep.com', 'fleeing.cc',
+  'gixpos.com', 'vintomland.com', 'tempm.com', 'mail.tm', 'mail.gw', 'moakt.com', 'dispostable.com'
 ];
 
 const isDisposableEmail = (email) => {
