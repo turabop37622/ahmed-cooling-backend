@@ -46,6 +46,19 @@ const validatePhoneNumber = (phone) => {
   return { valid: false, msg: 'Only Pakistan (+92) and Saudi Arabia (+966) numbers allowed' };
 };
 
+const DISPOSABLE_EMAIL_DOMAINS = [
+  'tempmail.com', 'mailinator.com', 'guerrillamail.com', 'yopmail.com', '10minutemail.com',
+  'trashmail.com', 'temp-mail.org', 'dispostable.com', 'getnada.com', 'dropmail.me',
+  'guerrillamail.biz', 'guerrillamail.de', 'guerrillamail.net', 'guerrillamail.org',
+  'guerrillamailblock.com', 'spam4.me', 'grr.la', 'teleworm.us', 'dayrep.com', 'fleeing.cc'
+];
+
+const isDisposableEmail = (email) => {
+  if (!email) return false;
+  const domain = email.split('@')[1];
+  return DISPOSABLE_EMAIL_DOMAINS.includes(domain?.toLowerCase());
+};
+
 // ================================
 // EMAIL: REGISTER
 // ================================
@@ -64,6 +77,10 @@ router.post('/register', [
 
     if (!userName || !userName.trim()) {
       return res.status(400).json({ success: false, message: 'Full name is required' });
+    }
+
+    if (isDisposableEmail(email)) {
+      return res.status(400).json({ success: false, message: 'Disposable email addresses are not allowed. Please use a permanent email.' });
     }
 
     if (!phone) {
@@ -302,6 +319,10 @@ router.post('/phone/register', async (req, res) => {
     }
     if (!email) {
       return res.status(400).json({ success: false, message: 'Email is required for OTP verification' });
+    }
+
+    if (isDisposableEmail(email)) {
+      return res.status(400).json({ success: false, message: 'Disposable email addresses are not allowed. Please use a permanent email.' });
     }
 
     const phoneCheck = validatePhoneNumber(phone);
