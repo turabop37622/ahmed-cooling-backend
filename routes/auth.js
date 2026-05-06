@@ -46,6 +46,8 @@ const validatePhoneNumber = (phone) => {
   return { valid: false, msg: 'Only Pakistan (+92) and Saudi Arabia (+966) numbers allowed' };
 };
 
+const axios = require('axios');
+
 const DISPOSABLE_EMAIL_DOMAINS = [
   'tempmail.com', 'mailinator.com', 'guerrillamail.com', 'yopmail.com', '10minutemail.com',
   'trashmail.com', 'temp-mail.org', 'dispostable.com', 'getnada.com', 'dropmail.me',
@@ -54,10 +56,21 @@ const DISPOSABLE_EMAIL_DOMAINS = [
   'gixpos.com', 'vintomland.com', 'tempm.com', 'mail.tm', 'mail.gw', 'moakt.com', 'dispostable.com'
 ];
 
-const isDisposableEmail = (email) => {
+const isDisposableEmail = async (email) => {
   if (!email) return false;
-  const domain = email.split('@')[1];
-  return DISPOSABLE_EMAIL_DOMAINS.includes(domain?.toLowerCase());
+  
+  // 1. Check local list first (fast)
+  const domain = email.split('@')[1]?.toLowerCase();
+  if (DISPOSABLE_EMAIL_DOMAINS.includes(domain)) return true;
+
+  // 2. Check Kickbox API (reliable)
+  try {
+    const response = await axios.get(`https://open.kickbox.com/v1/disposable/${email}`, { timeout: 3000 });
+    return response.data.disposable === true;
+  } catch (error) {
+    console.log('⚠️ Kickbox API error, using local list check only');
+    return false;
+  }
 };
 
 // ================================
@@ -80,7 +93,7 @@ router.post('/register', [
       return res.status(400).json({ success: false, message: 'Full name is required' });
     }
 
-    if (isDisposableEmail(email)) {
+    if (await isDisposableEmail(email)) {
       return res.status(400).json({ success: false, message: 'Disposable email addresses are not allowed. Please use a permanent email.' });
     }
 
@@ -322,7 +335,7 @@ router.post('/phone/register', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email is required for OTP verification' });
     }
 
-    if (isDisposableEmail(email)) {
+    if (await isDisposableEmail(email)) {
       return res.status(400).json({ success: false, message: 'Disposable email addresses are not allowed. Please use a permanent email.' });
     }
 
