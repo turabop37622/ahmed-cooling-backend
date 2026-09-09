@@ -7,25 +7,28 @@ async function createAdmin() {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log('Connected to MongoDB');
 
-    const existing = await User.findOne({ role: 'admin' });
-    if (existing) {
-      console.log('Admin already exists:', existing.email || existing.phone);
-      await mongoose.disconnect();
-      return;
+    let admin = await User.findOne({ role: 'admin' });
+    if (admin) {
+      admin.email = 'ahmad9038@legend.com';
+      admin.password = 'Ahmad389104@';
+      admin.fullName = 'Ahmed Admin';
+      admin.isVerified = true;
+      await admin.save();
+      console.log('Existing Admin credentials updated!');
+    } else {
+      admin = new User({
+        fullName: 'Ahmed Admin',
+        email: 'ahmad9038@legend.com',
+        password: 'Ahmad389104@',
+        role: 'admin',
+        isVerified: true,
+        authProvider: 'local',
+      });
+      await admin.save();
+      console.log('Admin created!');
     }
-
-    const admin = new User({
-      fullName: 'Admin',
-      email: 'admin@ahmedcooling.com',
-      password: 'admin123456',
-      role: 'admin',
-      isVerified: true,
-      authProvider: 'local',
-    });
-    await admin.save();
-    console.log('Admin created!');
-    console.log('Email: admin@ahmedcooling.com');
-    console.log('Password: Ahmadlegend9038@');
+    console.log('Email: ahmad9038@legend.com');
+    console.log('Password: Ahmad389104@');
 
     await mongoose.disconnect();
   } catch (err) {

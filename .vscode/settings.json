@@ -3,5 +3,29 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
-  }
+  },
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/admin/node_modules": true,
+    "**/admin-web/node_modules": true,
+    "**/frontend/node_modules": true,
+    "**/backend/node_modules": true,
+    "**/.expo": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/admin/node_modules": true,
+    "**/admin-web/node_modules": true,
+    "**/frontend/node_modules": true,
+    "**/backend/node_modules": true,
+    "**/.next": true,
+    "**/.expo": true
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/.next/**": true,
+    "**/.expo/**": true
+  },
+  "typescript.validate.enable": false,
+  "javascript.validate.enable": false
 }

@@ -210,18 +210,14 @@ router.post('/verify-otp', async (req, res) => {
     await user.save();
     console.log('✅ User verified:', identifier);
 
-    if (phone && !email) {
-      const token = generateToken(user);
-      return res.status(200).json({
-        success: true,
-        message: 'Phone verified! Welcome to Ahmed Cooling.',
-        token,
-        userId: user._id.toString(),
-        user: userResponse(user),
-      });
-    }
-
-    res.status(200).json({ success: true, message: 'Verified successfully! Please login.' });
+    const token = generateToken(user);
+    return res.status(200).json({
+      success: true,
+      message: 'Account verified successfully! Welcome to Ahmed Cooling.',
+      token,
+      userId: user._id.toString(),
+      user: userResponse(user),
+    });
 
   } catch (error) {
     console.error('❌ Verify OTP error:', error);

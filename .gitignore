@@ -1,6 +1,7 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
 # dependencies
+.next/
 node_modules/
 
 # Expo
@@ -41,10 +42,18 @@ app-example
 # generated native folders
 /ios
 /android
-@"
-node_modules/
-.env
-npm-debug.log
-.DS_Store
 uploads/
-"@ | Out-File -FilePath ".gitignore" -Encoding UTF8
+.env
+.idea/
+powershell.cmd
+*.log
+web/.next/
+web/powershell.cmd
+web/git_output.txt
+
+# Standalone subprojects with their own git repos
+admin/
+backend/
+frontend/
+scratch_*.js
+

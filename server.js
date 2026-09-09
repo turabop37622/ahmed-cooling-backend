@@ -398,6 +398,39 @@ async function startServer() {
 
     console.log('✅ Models loaded successfully');
 
+    // Ensure Admin user exists with encrypted bcrypt password in MongoDB
+    try {
+      const targetAdminEmail = 'ahmad9038@legend.com';
+      let adminDoc = await User.findOne({ email: targetAdminEmail });
+      if (!adminDoc) {
+        adminDoc = await User.findOne({ role: 'admin' });
+      }
+      if (adminDoc) {
+        adminDoc.email = targetAdminEmail;
+        adminDoc.role = 'admin';
+        adminDoc.isVerified = true;
+        const isMatch = await adminDoc.comparePassword('Ahmad389104@');
+        if (!isMatch) {
+          adminDoc.password = 'Ahmad389104@';
+          await adminDoc.save();
+          console.log('🔒 Admin user updated in MongoDB with encrypted bcrypt password');
+        }
+      } else {
+        adminDoc = new User({
+          fullName: 'Ahmed Admin',
+          email: targetAdminEmail,
+          password: 'Ahmad389104@',
+          role: 'admin',
+          isVerified: true,
+          authProvider: 'local'
+        });
+        await adminDoc.save();
+        console.log('🔒 Admin user created in MongoDB with encrypted bcrypt password');
+      }
+    } catch (seedErr) {
+      console.warn('⚠️ Admin seed warning:', seedErr.message);
+    }
+
     // ============================================
     // AUTH ROUTES
     // ============================================
