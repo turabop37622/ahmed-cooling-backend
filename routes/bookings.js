@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const Booking = require('../models/Booking');
 const Service = require('../models/Service');
@@ -1050,15 +1051,31 @@ router.post('/:id/feedback', auth, async (req, res) => {
 
 router.post('/public/:bookingId/review', async (req, res) => {
   try {
-    const { rating, comment } = req.body;
+    const { rating, comment, name } = req.body;
     if (!rating || rating < 1 || rating > 5) return res.status(400).json({ success: false, message: 'Rating 1-5 required' });
 
-    const booking = await Booking.findOne({ bookingId: req.params.bookingId });
+    const idParam = String(req.params.bookingId || '').trim();
+    const isObjectId = mongoose.Types.ObjectId.isValid(idParam);
+    const booking = await Booking.findOne({
+      $or: [
+        ...(isObjectId ? [{ _id: idParam }] : []),
+        { bookingId: idParam },
+        { orderNumber: idParam },
+        { orderNumber: idParam.replace(/^#/, '') },
+      ]
+    });
+
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
     if (booking.status !== 'completed') return res.status(400).json({ success: false, message: 'Only completed bookings can be reviewed' });
     if (booking.customerFeedback?.rating) return res.status(400).json({ success: false, message: 'Review already submitted' });
 
-    booking.customerFeedback = { rating: parseInt(rating), comment: comment || '', date: new Date() };
+    booking.customerFeedback = {
+      rating: parseInt(rating),
+      comment: comment || '',
+      name: name || booking.customerName || 'Customer',
+      date: new Date(),
+      approved: false,
+    };
     await booking.save();
 
     res.json({ success: true, message: 'Review submitted! Thank you.', booking });
