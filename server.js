@@ -474,11 +474,38 @@ async function startServer() {
       try {
         const { lat, lng, lang } = req.query;
         if (!lat || !lng) return res.status(400).json({ success: false, message: 'lat and lng required' });
-        const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&language=${lang || 'en'}&key=${GOOGLE_GEOCODE_KEY}`;
-        const gRes = await axios.get(url, { timeout: 8000 });
-        if (gRes.data?.status === 'OK' && gRes.data.results?.length) {
-          return res.json({ success: true, address: gRes.data.results[0].formatted_address });
+
+        // 1. Attempt Google Maps Reverse Geocode
+        try {
+          const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&language=${lang || 'en'}&key=${GOOGLE_GEOCODE_KEY}`;
+          const gRes = await axios.get(url, { timeout: 6000 });
+          if (gRes.data?.status === 'OK' && gRes.data.results?.length) {
+            return res.json({ success: true, address: gRes.data.results[0].formatted_address });
+          }
+        } catch (gErr) {
+          // Fall through to OpenStreetMap
         }
+
+        // 2. Fallback to OpenStreetMap Nominatim
+        try {
+          const osmUrl = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=${lang || 'ar'}`;
+          const osmRes = await axios.get(osmUrl, {
+            timeout: 6000,
+            headers: { 'User-Agent': 'AhmedCoolingWorkshop/1.0' },
+          });
+          if (osmRes.data?.address) {
+            const a = osmRes.data.address;
+            const road = a.road || a.pedestrian || a.street || '';
+            const district = a.neighbourhood || a.suburb || a.quarter || '';
+            const city = a.city || a.town || (lang === 'ar' ? 'جدة' : 'Jeddah');
+            const parts = [road, district, city].filter(Boolean);
+            const address = parts.length >= 2 ? parts.join(lang === 'ar' ? '، ' : ', ') : (osmRes.data.display_name || `${city}, KSA`);
+            return res.json({ success: true, address });
+          }
+        } catch (osmErr) {
+          // Fall through
+        }
+
         return res.json({ success: false, message: 'No results' });
       } catch {
         return res.json({ success: false, message: 'Geocode failed' });
