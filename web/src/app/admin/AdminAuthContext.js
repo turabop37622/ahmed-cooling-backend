@@ -14,16 +14,24 @@ export function AdminAuthProvider({ children }) {
 
   useEffect(() => {
     try {
-      const savedToken = localStorage.getItem('adminToken');
-      const savedUser = localStorage.getItem('adminUser');
-      if (savedToken && savedUser) {
-        setToken(savedToken);
-        setUser(JSON.parse(savedUser));
-      }
-    } catch (e) {
-      console.error('Error loading admin auth:', e);
+      // Purge any lingering permanent localStorage cache for enhanced security
       localStorage.removeItem('adminToken');
       localStorage.removeItem('adminUser');
+
+      // Session-only storage: automatically destroyed when tab/browser is closed
+      const sessionToken = sessionStorage.getItem('adminToken');
+      const sessionUser = sessionStorage.getItem('adminUser');
+      if (sessionToken && sessionUser) {
+        setToken(sessionToken);
+        setUser(JSON.parse(sessionUser));
+      } else {
+        setToken(null);
+        setUser(null);
+      }
+    } catch (e) {
+      console.error('Error loading admin auth session:', e);
+      sessionStorage.removeItem('adminToken');
+      sessionStorage.removeItem('adminUser');
     } finally {
       setLoading(false);
     }
@@ -32,15 +40,28 @@ export function AdminAuthProvider({ children }) {
   const login = useCallback((authData) => {
     const t = authData.token;
     const u = authData.user || authData.admin || { fullName: 'Admin', email: authData.email, role: 'admin' };
+
+    // Verify the user has admin role
+    const role = (u.role || '').toLowerCase();
+    if (role !== 'admin' && role !== 'superadmin') {
+      throw new Error('Access denied. Only admin users can access this panel.');
+    }
+
     setToken(t);
     setUser(u);
-    localStorage.setItem('adminToken', t);
-    localStorage.setItem('adminUser', JSON.stringify(u));
+
+    // Save exclusively to sessionStorage - never to persistent localStorage
+    sessionStorage.setItem('adminToken', t);
+    sessionStorage.setItem('adminUser', JSON.stringify(u));
+    localStorage.removeItem('adminToken');
+    localStorage.removeItem('adminUser');
   }, []);
 
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
+    sessionStorage.removeItem('adminToken');
+    sessionStorage.removeItem('adminUser');
     localStorage.removeItem('adminToken');
     localStorage.removeItem('adminUser');
     router.push('/admin/login');

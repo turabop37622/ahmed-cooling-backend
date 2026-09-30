@@ -39,6 +39,19 @@ function AdminShell({ children }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // Enforce LTR for Admin Panel
+  useEffect(() => {
+    document.documentElement.dir = 'ltr';
+    document.documentElement.lang = 'en';
+    return () => {
+      try {
+        const saved = localStorage.getItem('language') || 'ar';
+        document.documentElement.dir = saved === 'ar' ? 'rtl' : 'ltr';
+        document.documentElement.lang = saved;
+      } catch (e) {}
+    };
+  }, []);
+
   // Check authentication
   useEffect(() => {
     if (!loading && !token && pathname !== '/admin/login') {
@@ -48,13 +61,13 @@ function AdminShell({ children }) {
 
   // If on login page, render clean page without admin sidebar
   if (pathname === '/admin/login') {
-    return <div className="min-h-screen bg-slate-50 dark:bg-slate-950">{children}</div>;
+    return <div className="min-h-screen bg-slate-50 dark:bg-slate-950" dir="ltr">{children}</div>;
   }
 
   // Loading state
   if (loading || (!token && pathname !== '/admin/login')) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-300">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-300" dir="ltr">
         <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4" />
         <p className="text-sm font-medium tracking-wide">Loading Admin Portal...</p>
       </div>
@@ -62,7 +75,7 @@ function AdminShell({ children }) {
   }
 
   return (
-    <div className="min-h-screen flex bg-[#F8FAFC] dark:bg-[#090D16] text-[#0F172A] dark:text-[#F1F5F9] antialiased">
+    <div className="min-h-screen flex bg-[#F8FAFC] dark:bg-[#090D16] text-[#0F172A] dark:text-[#F1F5F9] antialiased" dir="ltr">
       {/* Mobile Backdrop */}
       {mobileOpen && (
         <div
@@ -80,8 +93,8 @@ function AdminShell({ children }) {
         {/* Brand Header */}
         <div className="h-16 flex items-center justify-between px-4 border-b border-slate-100 dark:border-slate-800/80 shrink-0">
           <Link href="/admin/dashboard" className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center shrink-0 shadow-md shadow-blue-500/25">
-              <Snowflake className="w-6 h-6 text-white animate-pulse" />
+            <div className="w-10 h-10 rounded-xl bg-blue-600/10 dark:bg-blue-500/10 flex items-center justify-center shrink-0 p-1">
+              <img src="/logo-icon.png" alt="Ahmed Cooling" className="w-8 h-8 object-contain" />
             </div>
             {(!collapsed || mobileOpen) && (
               <div className="min-w-0">
@@ -218,19 +231,19 @@ function AdminShell({ children }) {
             </button>
 
             {/* Region & Status Indicator */}
-            <div className="flex items-center gap-2">
-              <span className="flex h-2 w-2 relative">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="flex h-2 w-2 relative shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
-              <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                Jeddah / Makkah Workshop Live
+              <span className="text-xs font-semibold text-slate-600 dark:text-slate-300 truncate">
+                <span className="hidden sm:inline">Jeddah / Makkah </span>Workshop Live
               </span>
             </div>
           </div>
 
           {/* Right Header Controls */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             {/* Theme Toggle */}
             <button
               onClick={toggleDarkMode}
@@ -240,13 +253,14 @@ function AdminShell({ children }) {
               {isDarkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-600" />}
             </button>
 
-            {/* Header Logout for Mobile/Quick Access */}
+            {/* Header Logout */}
             <button
               onClick={logout}
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-colors"
+              className="flex items-center gap-1.5 p-2 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-colors"
+              title="Logout"
             >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Logout</span>
+              <LogOut className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+              <span className="hidden sm:inline">Logout</span>
             </button>
           </div>
         </header>

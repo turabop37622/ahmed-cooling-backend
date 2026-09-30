@@ -77,8 +77,24 @@
       },
       
       // ============================================
-      // LOCATION
+      // LOCATION & COUNTRY
       // ============================================
+      country: {
+        type: String,
+        enum: ['Saudi Arabia', 'Qatar', 'Pakistan', 'Other'],
+        default: 'Saudi Arabia',
+        index: true
+      },
+      city: {
+        type: String,
+        default: '',
+        index: true
+      },
+      currency: {
+        type: String,
+        enum: ['SAR', 'QAR', 'PKR'],
+        default: 'SAR'
+      },
       address: {
         type: String,
         required: true

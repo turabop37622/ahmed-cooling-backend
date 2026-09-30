@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Loader2, Inbox, RefreshCw } from 'lucide-react';
 import { useTranslation } from '@/contexts/TranslationContext';
 import { getServices } from '@/lib/api';
+import { FALLBACK_SERVICES } from '@/lib/servicesData';
 import ServiceCard from '@/components/ServiceCard';
 
 const FILTERS = [
@@ -36,14 +37,13 @@ function serviceMatchesFilter(service, filterId) {
 }
 
 export default function ServicesPage() {
-  const { t, isRTL } = useTranslation();
+  const { t, language, isRTL } = useTranslation();
   const router = useRouter();
-  const [allServices, setAllServices] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [allServices, setAllServices] = useState(FALLBACK_SERVICES);
+  const [loading, setLoading] = useState(false);
   const [activeFilter, setActiveFilter] = useState('all');
 
   const loadServices = useCallback(async () => {
-    setLoading(true);
     try {
       const res = await getServices();
       const list = res?.services ?? res?.data ?? res;
@@ -84,7 +84,7 @@ export default function ServicesPage() {
     <div className="min-h-[60vh] bg-bg pb-12 dark:bg-slate-950">
       <div className="mx-auto max-w-[1560px] px-4 pt-8 pb-6 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="mb-6">
+        <div className="mb-6 scroll-reveal">
           <div className="mb-3 flex flex-wrap items-end gap-3">
             <div className="h-8 w-1 shrink-0 rounded-full bg-primary dark:bg-blue-500" />
             <div className="min-w-0 flex-1">
@@ -103,8 +103,8 @@ export default function ServicesPage() {
 
         {/* Category chips */}
         <div
-          className="-mx-1 mb-8 flex gap-2 overflow-x-auto px-1 pb-1 scrollbar-none"
-          style={{ scrollbarWidth: 'none' }}
+          className="-mx-1 mb-8 flex gap-2 overflow-x-auto px-1 pb-1 scrollbar-none no-scrollbar [&::-webkit-scrollbar]:hidden scroll-reveal delay-100"
+          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           dir={isRTL ? 'rtl' : 'ltr'}
         >
           {FILTERS.map((f) => {
@@ -126,8 +126,8 @@ export default function ServicesPage() {
           })}
         </div>
 
-        {/* Loading */}
-        {loading && (
+        {/* Loading - only if no services loaded yet */}
+        {loading && allServices.length === 0 && (
           <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4">
             <Loader2 className="h-10 w-10 animate-spin text-primary dark:text-blue-400" />
             <p className="text-sm font-semibold text-sub dark:text-slate-400">{t.loadingServices}</p>
@@ -135,15 +135,37 @@ export default function ServicesPage() {
         )}
 
         {/* Grid: 3 cards per row */}
-        {!loading && filteredServices.length > 0 && (
+        {filteredServices.length > 0 && (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredServices.map((svc) => (
+            {filteredServices.map((svc, idx) => (
               <ServiceCard
                 key={svc._id || svc.id || svc.name}
                 service={svc}
                 onBook={handleBook}
+                index={idx}
               />
             ))}
+          </div>
+        )}
+
+        {/* Pricing Terms & VAT Banner */}
+        {filteredServices.length > 0 && (
+          <div className="mt-8 rounded-2xl border border-blue-100 bg-blue-50/70 p-4 text-xs font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300 scroll-reveal">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-start">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                <span>
+                  {language === 'ar'
+                    ? 'جميع الأسعار تشمل ضريبة القيمة المضافة 15% • قطع الغيار غير مشمولة وتُحدد حسب الحاجة'
+                    : 'All prices include 15% VAT • Spare parts are not included and quoted separately'}
+                </span>
+              </div>
+              <p className="font-bold text-primary dark:text-blue-400">
+                {language === 'ar'
+                  ? 'الأسعار تبدأ من وتختلف حسب المعاينة والفحص الميداني.'
+                  : 'Prices start from and may vary after inspection.'}
+              </p>
+            </div>
           </div>
         )}
 
@@ -170,7 +192,7 @@ export default function ServicesPage() {
 
       {/* Footer info */}
       {!loading && (
-        <div className="flex items-center justify-center gap-2 pt-2">
+        <div className="flex items-center justify-center gap-2 pt-2 scroll-reveal-fade">
           <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" aria-hidden />
           <p className="text-xs font-semibold text-sub dark:text-slate-500">{t.servicesUpdated}</p>
         </div>

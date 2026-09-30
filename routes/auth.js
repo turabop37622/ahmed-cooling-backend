@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const { body, validationResult } = require('express-validator');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const generateToken = (user) => {
   return jwt.sign(
@@ -43,7 +43,10 @@ const validatePhoneNumber = (phone) => {
   if (clean.startsWith('+966')) {
     return /^\+9665\d{8}$/.test(clean) ? { valid: true } : { valid: false, msg: 'Saudi: +966 5X XXXXXXXX' };
   }
-  return { valid: false, msg: 'Only Pakistan (+92) and Saudi Arabia (+966) numbers allowed' };
+  if (clean.startsWith('+974')) {
+    return /^\+974[3567]\d{7}$/.test(clean) ? { valid: true } : { valid: false, msg: 'Qatar: +974 XXXX XXXX (8 digits starting with 3, 5, 6, or 7)' };
+  }
+  return { valid: false, msg: 'Only Pakistan (+92), Saudi Arabia (+966), and Qatar (+974) numbers allowed' };
 };
 
 const axios = require('axios');

@@ -1,4 +1,4 @@
-import { Geist } from "next/font/google";
+import { Plus_Jakarta_Sans, IBM_Plex_Sans_Arabic, Tajawal } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "../contexts/ThemeContext";
@@ -7,54 +7,75 @@ import { AuthProvider } from "../contexts/AuthContext";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
 import WhatsAppButton from "../components/WhatsAppButton";
+import ScrollObserver from "../components/ScrollObserver";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const plusJakartaSans = Plus_Jakarta_Sans({
+  variable: "--font-plus-jakarta-sans",
   subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700", "800"],
+  display: "swap",
+});
+
+const ibmPlexArabic = IBM_Plex_Sans_Arabic({
+  variable: "--font-ibm-plex-arabic",
+  subsets: ["arabic"],
+  weight: ["300", "400", "500", "600", "700"],
+  display: "swap",
+});
+
+const tajawal = Tajawal({
+  variable: "--font-tajawal",
+  subsets: ["arabic"],
+  weight: ["300", "400", "500", "700", "800", "900"],
+  display: "swap",
 });
 
 export const metadata = {
   metadataBase: new URL('https://www.ahmedcoolingworkshop.com'),
   title: {
-    default: 'Ahmed Cooling Workshop | AC Repair & Appliance Service Jeddah Makkah | صيانة مكيفات جدة مكة',
+    default: 'ورشة أحمد للتبريد | صيانة مكيفات وأجهزة منزلية جدة ومكة | Ahmed Cooling Workshop KSA',
     template: '%s | Ahmed Cooling Workshop',
   },
-  description: 'Professional AC repair, installation, deep cleaning & appliance maintenance in Jeddah & Makkah, Saudi Arabia. Refrigerator, washing machine, stove repair. 24/7 emergency service. صيانة وإصلاح المكيفات والأجهزة المنزلية في جدة ومكة المكرمة. خدمة طوارئ ٢٤ ساعة.',
+  description: 'ورشة أحمد للتبريد - صيانة وإصلاح المكيفات (سبليت، شباك، مركزي) والأجهزة المنزلية بجدة ومكة. خدمة طوارئ 24/7. Trusted AC repair in Jeddah & Makkah for residents & expats.',
   keywords: [
-    'AC repair Jeddah', 'AC repair Makkah', 'air conditioner repair Saudi Arabia',
-    'AC installation Jeddah', 'AC deep cleaning', 'AC gas refill Jeddah',
-    'refrigerator repair Jeddah', 'washing machine repair Makkah',
-    'appliance repair Saudi Arabia', 'HVAC service Jeddah',
-    'central AC maintenance', '24/7 emergency AC repair Jeddah',
-    'stove repair Makkah', 'freezer repair Jeddah',
-    'electrical wiring fix Saudi Arabia', 'home appliance service',
-    'صيانة مكيفات جدة', 'إصلاح مكيفات مكة', 'تصليح مكيفات',
-    'تنظيف مكيفات جدة', 'صيانة أجهزة منزلية', 'إصلاح ثلاجات جدة',
-    'إصلاح غسالات مكة', 'فني مكيفات جدة', 'صيانة مكيفات مكة المكرمة',
-    'تعبئة غاز مكيف', 'إصلاح مكيف سبليت', 'صيانة تكييف مركزي',
-    'خدمة طوارئ تكييف', 'ورشة أحمد للتبريد',
+    // Saudi Arabic Primary Keywords
+    'ورشة أحمد للتبريد', 'صيانة مكيفات جدة', 'تصليح مكيفات مكة', 'فني مكيفات اسبليت جدة',
+    'غسيل مكيفات جدة', 'تنظيف مكيفات مكة', 'تعبئة فريون مكيف جدة', 'صيانة أجهزة منزلية جدة',
+    'إصلاح ثلاجات جدة', 'إصلاح غسالات مكة', 'فني تكييف مركزي جدة', 'صيانة تكييف مكة المكرمة',
+    'شركة صيانة مكيفات بجدة', 'خدمة طوارئ تكييف 24 ساعة', 'تصليح أجهزة منزلية مكة',
+    // English Keywords for Expats Living in Saudi Arabia
+    'Ahmed Cooling Workshop', 'AC repair Jeddah', 'AC repair Makkah', 'air conditioner repair Saudi Arabia',
+    'certified AC technician Jeddah', 'split AC maintenance Jeddah', 'AC deep cleaning Jeddah',
+    'AC gas refill KSA', 'refrigerator repair Jeddah', 'washing machine repair Makkah',
+    'emergency AC repair Jeddah', 'appliance repair Jeddah', 'HVAC technician Jeddah',
+    'home appliance maintenance Saudi Arabia', 'central AC maintenance Makkah', 'freon leak fix Jeddah',
   ],
   icons: {
-    icon: '/favicon.svg',
-    shortcut: '/favicon.svg',
-    apple: '/favicon.svg',
+    icon: '/logo-icon.png',
+    shortcut: '/logo-icon.png',
+    apple: '/logo-icon.png',
   },
   openGraph: {
     type: 'website',
     locale: 'ar_SA',
-    alternateLocale: 'en_US',
+    alternateLocale: ['en_US', 'en_GB'],
     url: 'https://www.ahmedcoolingworkshop.com',
-    title: 'Ahmed Cooling Workshop | AC & Appliance Repair Jeddah Makkah',
-    description: 'Professional AC repair, installation & appliance maintenance in Jeddah & Makkah. 24/7 emergency service. صيانة مكيفات وأجهزة منزلية جدة ومكة.',
+    title: 'ورشة أحمد للتبريد | صيانة مكيفات وأجهزة منزلية جدة ومكة | Ahmed Cooling Workshop KSA',
+    description: 'ورشة أحمد للتبريد - صيانة وإصلاح المكيفات والأجهزة المنزلية في جدة ومكة المكرمة. خدمة طوارئ 24/7 مع فنيين مؤهلين وضمان رسمي معتمد.',
     siteName: 'Ahmed Cooling Workshop - ورشة أحمد للتبريد',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Ahmed Cooling Workshop | AC Repair Jeddah & Makkah',
-    description: 'Professional AC & appliance repair in Saudi Arabia. 24/7 emergency service.',
+    title: 'ورشة أحمد للتبريد | Ahmed Cooling Workshop KSA',
+    description: 'ورشة أحمد للتبريد - صيانة وإصلاح المكيفات والأجهزة المنزلية في جدة ومكة المكرمة. خدمة طوارئ 24/7 مع ضمان معتمد.',
   },
   alternates: {
     canonical: 'https://www.ahmedcoolingworkshop.com',
+    languages: {
+      'ar-SA': 'https://www.ahmedcoolingworkshop.com',
+      'en-SA': 'https://www.ahmedcoolingworkshop.com',
+      'x-default': 'https://www.ahmedcoolingworkshop.com',
+    },
   },
   robots: {
     index: true,
@@ -80,21 +101,41 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="ar" className={`${geistSans.variable} h-full`} translate="no" suppressHydrationWarning>
+    <html
+      lang="ar"
+      className={`${plusJakartaSans.variable} ${ibmPlexArabic.variable} ${tajawal.variable} h-full`}
+      translate="no"
+      data-scroll-behavior="smooth"
+      suppressHydrationWarning
+    >
       <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Almarai:wght@300;400;700;800&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=Tajawal:wght@300;400;500;700;800;900&display=swap"
+          rel="stylesheet"
+        />
+        {/* Prevent dark mode flash — runs before React hydration */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{if(localStorage.getItem('darkMode')==='true'){document.documentElement.classList.add('dark')}}catch(e){}})();`,
+          }}
+        />
         <meta name="google" content="notranslate" />
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
             __html: JSON.stringify({
               '@context': 'https://schema.org',
-              '@type': 'LocalBusiness',
+              '@type': ['LocalBusiness', 'HVACBusiness'],
               name: 'Ahmed Cooling Workshop - ورشة أحمد للتبريد',
-              alternateName: 'ورشة أحمد للتبريد والأجهزة المنزلية',
-              description: 'Professional AC repair, installation, deep cleaning & home appliance maintenance in Jeddah & Makkah, Saudi Arabia.',
+              alternateName: 'Ahmed Cooling Workshop KSA',
+              description: 'ورشة أحمد للتبريد - صيانة وإصلاح المكيفات (سبليت وشباك ومركزي)، الثلاجات والغسالات في جدة ومكة المكرمة. خدمة طوارئ 24/7 مع ضمان رسمي معتمد وقطع غيار أصلية.',
+              disambiguatingDescription: 'Professional air conditioning and home appliance repair workshop in Saudi Arabia serving customers across Jeddah and Makkah.',
               url: 'https://www.ahmedcoolingworkshop.com',
               telephone: '+966590192146',
-              email: 'info@ahmedcoolingworkshop.com',
+              email: 'ahmedcoolingworkshop@gmail.com',
+              knowsLanguage: ['ar', 'en'],
               address: {
                 '@type': 'PostalAddress',
                 addressLocality: 'Jeddah',
@@ -109,12 +150,13 @@ export default function RootLayout({ children }) {
               areaServed: [
                 { '@type': 'City', name: 'Jeddah', '@id': 'https://www.wikidata.org/wiki/Q5880' },
                 { '@type': 'City', name: 'Makkah', '@id': 'https://www.wikidata.org/wiki/Q5806' },
+                { '@type': 'Country', name: 'Saudi Arabia' },
               ],
               serviceType: [
                 'AC Repair', 'AC Installation', 'AC Deep Cleaning', 'AC Gas Refill',
                 'Refrigerator Repair', 'Washing Machine Repair', 'Freezer Repair',
                 'Stove & Oven Repair', 'Microwave Repair', 'Electrical Wiring',
-                'Central AC Service', 'General Maintenance', 'Emergency Repair',
+                'Central AC Service', 'General Maintenance', 'Emergency AC Repair',
               ],
               openingHoursSpecification: {
                 '@type': 'OpeningHoursSpecification',
@@ -122,17 +164,11 @@ export default function RootLayout({ children }) {
                 opens: '00:00',
                 closes: '23:59',
               },
-              priceRange: 'SAR 150 - SAR 3000',
-              aggregateRating: {
-                '@type': 'AggregateRating',
-                ratingValue: '4.8',
-                reviewCount: '250',
-                bestRating: '5',
-                reviewCount: '250',
-                bestRating: '5',
-              },
+              priceRange: 'SAR 100 - SAR 2000',
               sameAs: [
                 'https://wa.me/966590192146',
+                'https://www.instagram.com/ahmedcoolingworkshop/',
+                'https://www.facebook.com/profile.php?id=61589456784736',
               ],
             }),
           }}
@@ -143,24 +179,26 @@ export default function RootLayout({ children }) {
             __html: JSON.stringify({
               '@context': 'https://schema.org',
               '@type': 'Service',
-              serviceType: 'HVAC and Home Appliance Repair',
+              serviceType: 'HVAC and Home Appliance Repair Services in Saudi Arabia',
               provider: {
                 '@type': 'LocalBusiness',
-                name: 'Ahmed Cooling Workshop',
+                name: 'Ahmed Cooling Workshop - ورشة أحمد للتبريد',
+                telephone: '+966590192146',
               },
-              areaServed: {
-                '@type': 'Country',
-                name: 'Saudi Arabia',
-              },
+              areaServed: [
+                { '@type': 'City', name: 'Jeddah' },
+                { '@type': 'City', name: 'Makkah' },
+              ],
               hasOfferCatalog: {
                 '@type': 'OfferCatalog',
-                name: 'AC & Appliance Repair Services',
+                name: 'AC & Appliance Repair Services - خدمات صيانة المكيفات والأجهزة',
                 itemListElement: [
-                  { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'AC Repair - إصلاح المكيفات' } },
-                  { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'AC Installation - تركيب المكيفات' } },
-                  { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'AC Deep Cleaning - تنظيف عميق للمكيفات' } },
-                  { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Refrigerator Repair - إصلاح الثلاجات' } },
-                  { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Washing Machine Repair - إصلاح الغسالات' } },
+                  { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'AC Repair & Diagnostics - إصلاح وصيانة المكيفات' } },
+                  { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'AC Installation & Dismantling - فك وتركيب المكيفات' } },
+                  { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'AC Deep Jet Wash Cleaning - غسيل وتنظيف عميق للمكيفات' } },
+                  { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'AC Freon Gas Refill - تعبئة وشحن فريون أصلي' } },
+                  { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Refrigerator & Freezer Repair - صيانة الثلاجات والفريزر' } },
+                  { '@type': 'Offer', itemOffered: { '@type': 'Service', name: 'Washing Machine Repair - صيانة وإصلاح الغسالات' } },
                 ],
               },
             }),
@@ -169,7 +207,7 @@ export default function RootLayout({ children }) {
         {/* TikTok Pixel Code */}
         <Script
           id="tiktok-pixel"
-          strategy="afterInteractive"
+          strategy="lazyOnload"
           dangerouslySetInnerHTML={{
             __html: `
               !function (w, d, t) {
@@ -181,11 +219,12 @@ export default function RootLayout({ children }) {
           }}
         />
       </head>
-      <body className="min-h-full flex flex-col bg-[#F0F4FF] text-[#0F172A] dark:bg-[#0F172A] dark:text-[#F1F5F9] antialiased">
+      <body className="min-h-full flex flex-col bg-[#F0F4FF] text-[#0F172A] dark:bg-[#0F172A] dark:text-[#F1F5F9] antialiased" suppressHydrationWarning>
         <ThemeProvider>
           <TranslationProvider>
             <AuthProvider>
               <Navbar />
+              <ScrollObserver />
               <main className="flex-1">{children}</main>
               <Footer />
               <WhatsAppButton />

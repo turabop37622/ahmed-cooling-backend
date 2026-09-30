@@ -98,10 +98,11 @@ export const translations = {
 
     // Home - Hero
     heroAvailable: '✅ Serving Jeddah & Makkah',
-    heroTitle: 'Your Home.\nOur Expertise.',
-    heroSubtitle: 'From AC breakdowns to appliance emergencies — we fix it all. Trusted by 500+ families across Saudi Arabia.',
+    heroBadge: '🇸🇦 Serving Jeddah & Makkah • Certified AC & Appliance Workshop',
+    heroTitle: 'Ahmed Cooling Workshop\nAC & Appliance Repair KSA',
+    heroSubtitle: 'Certified AC repair, split AC maintenance, freon gas refill, and home appliance repair across Jeddah & Makkah. 24/7 emergency service with authentic parts and guaranteed warranty.',
     heroEmergencyCta: '🚨 24/7 Emergency Service',
-    heroStatYears: '15+', heroStatCustomers: '2K+', heroStatRating: '4.9',
+    heroStatYears: '10+', heroStatCustomers: '2.5K+', heroStatRating: '4.9',
 
     // Home - Services fallback
     svcAcRepair: 'AC Repair', svcAcRepairDesc: 'Expert diagnosis & repair for all AC brands',
@@ -135,10 +136,10 @@ export const translations = {
     serviceAreas: 'We Serve Across Saudi Arabia',
 
     // Home - Sections
-    ourServices: 'Our Services', seeAll: 'See All →',
+    ourServices: 'Our Services', seeAll: 'See All',
     emergencyStripTitle: '24/7 Emergency Repair',
     emergencyStripSub: 'Expert help, anytime you need it',
-    emergencyStripCta: 'Call →',
+    emergencyStripCta: 'Call',
 
     // Bottom Nav
     home: 'Home', services: 'Services', bookings: 'Bookings', profile: 'Profile',
@@ -175,6 +176,10 @@ export const translations = {
     orderLabel: 'Order:',
     serviceCharge: 'Service Charge', visitFee: 'Visit Fee', total: 'Total',
     cashPaymentNote: '💵 Cash payment after service completion',
+    vatIncluded: 'Prices include 15% VAT',
+    sparePartsNotIncluded: 'Spare parts not included (quoted separately if needed)',
+    pricesVaryInspection: 'Prices start from and may vary after inspection.',
+    gasRefillNotice: 'Starting from 180 SAR (varies by gas type & quantity)',
     rescheduleBooking: 'Reschedule Booking',
     noBookingsYet: 'No Bookings Yet',
     noBookingsFiltered: 'No {filter} Bookings',
@@ -485,7 +490,7 @@ export const translations = {
     brandName: 'أحمد للتبريد',
     brandTagline: 'وورشة الأجهزة',
     trustedTagline: 'شريكك الموثوق في الأجهزة',
-    trustedFooter: 'موثوق من أكثر من ٢٠٠٠ عميل في المملكة العربية السعودية',
+    trustedFooter: 'موثوق من أكثر من ٢٥٠٠ عميل في جدة ومكة المكرمة',
     loadingServices: 'جاري تحميل الخدمات...',
 
     years: 'سنوات', clients: 'عملاء', happy: 'رضا', from: 'من',
@@ -575,10 +580,11 @@ export const translations = {
     welcomeStatCustomers: '+2000', welcomeStatRating: '4.9★', welcomeStatServices: '+500',
 
     heroAvailable: '✅ نخدم جدة ومكة المكرمة',
-    heroTitle: 'بيتك.\nخبرتنا.',
-    heroSubtitle: 'من أعطال المكيفات إلى طوارئ الأجهزة — نصلح كل شيء. موثوقون من أكثر من ٥٠٠ عائلة في المملكة.',
+    heroBadge: '🇸🇦 ورشة معتمدة بجدة ومكة • صيانة منزلية وضمان شامل',
+    heroTitle: 'ورشة أحمد للتبريد\nصيانة مكيفات وأجهزة منزلية',
+    heroSubtitle: 'المركز المعتمد لصيانة وإصلاح مكيفات الاسبليت والشباك والمركزي، الثلاجات والغسالات في جدة ومكة المكرمة. خدمة طوارئ 24/7 مع ضمان معتمد وقطع غيار أصلية.',
     heroEmergencyCta: '🚨 خدمة طوارئ ٢٤/٧',
-    heroStatYears: '+15', heroStatCustomers: '+2 ألف', heroStatRating: '4.9',
+    heroStatYears: '+10', heroStatCustomers: '+2.5 ألف', heroStatRating: '4.9',
 
     svcAcRepair: 'إصلاح التكييف', svcAcRepairDesc: 'تشخيص وإصلاح احترافي لجميع ماركات التكييف',
     svcAcInstall: 'تركيب التكييف', svcAcInstallDesc: 'تركيب احترافي للتكييف السبليت والشباك',
@@ -602,13 +608,12 @@ export const translations = {
     whyWarrantyTitle: 'ضمان رسمي معتمد', whyWarrantyDesc: 'جودة عمل مضمونة',
 
     customerReviews: 'آراء العملاء', ratingPill: '⭐ 4.9 / 5',
+    serviceAreas: 'نخدم في جميع أنحاء جدة ومكة المكرمة',
 
-    serviceAreas: 'نخدم في جميع أنحاء المملكة العربية السعودية',
-
-    ourServices: 'خدماتنا', seeAll: '← عرض الكل',
+    ourServices: 'خدماتنا', seeAll: 'عرض الكل',
     emergencyStripTitle: 'إصلاح طوارئ 24/7',
     emergencyStripSub: 'مساعدة الخبراء في أي وقت',
-    emergencyStripCta: '← اتصل',
+    emergencyStripCta: 'اتصل الآن',
 
     home: 'الرئيسية', services: 'الخدمات', bookings: 'حجوزاتي', profile: 'الملف الشخصي',
 
@@ -642,6 +647,10 @@ export const translations = {
     orderLabel: 'الطلب:',
     serviceCharge: 'رسوم الخدمة', visitFee: 'رسوم الزيارة', total: 'المجموع',
     cashPaymentNote: '💵 الدفع نقداً بعد إتمام الخدمة',
+    vatIncluded: 'الأسعار شاملة ضريبة القيمة المضافة 15%',
+    sparePartsNotIncluded: 'قطع الغيار غير مشمولة (تُسعر بشكل منفصل عند الحاجة)',
+    pricesVaryInspection: 'الأسعار تبدأ من وتختلف حسب المعاينة والفحص الميداني.',
+    gasRefillNotice: 'يبدأ من 180 ريال (يختلف حسب نوع الفريون والكمية)',
     rescheduleBooking: 'إعادة جدولة الحجز',
     noBookingsYet: 'لا توجد حجوزات',
     noBookingsFiltered: 'لا حجوزات {filter}',

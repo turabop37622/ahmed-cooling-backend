@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Snowflake, Mail, Lock, Eye, EyeOff, User, Phone, AlertCircle, Loader2, ChevronDown, CheckCircle2, RefreshCw } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -12,8 +12,11 @@ const COUNTRY_CODES = [
   { code: '+966', label: '🇸🇦 +966', phonePlaceholder: '5XXXXXXXX', regex: /^5\d{8}$/ },
 ];
 
-export default function SignupPage() {
+function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectUrl = searchParams.get('redirect') || '/';
+
   const { login } = useAuth();
   const { t, language } = useTranslation();
 
@@ -58,7 +61,7 @@ export default function SignupPage() {
     if (password !== confirmPassword) return t.valPasswordsMismatch;
     if (!phoneNumber.trim()) return t.valPhoneRequired;
     if (!country.regex.test(phoneNumber)) {
-      return country.code === '+92' ? t.valPhonePk : t.valPhoneSa;
+      return t.valPhoneSa;
     }
     return null;
   };
@@ -134,14 +137,17 @@ export default function SignupPage() {
         phone: fullPhone,
         ...(response?.user || {}),
       };
-      login({
-        token: response?.token || 'verified-user-token',
-        user: userProfile,
-      });
-      try {
-        localStorage.setItem('user', JSON.stringify(userProfile));
-      } catch (e) {}
-      router.push('/');
+
+      if (response?.token) {
+        login({
+          token: response.token,
+          user: userProfile,
+        });
+        router.push(redirectUrl);
+      } else {
+        // Direct user to login with verified notice
+        router.push(`/login?verified=true${redirectUrl !== '/' ? `&redirect=${encodeURIComponent(redirectUrl)}` : ''}`);
+      }
     } catch (err) {
       const msg = err?.response?.data?.message || err?.response?.data?.error;
       setError(msg || t.invalidOTP);
@@ -166,11 +172,11 @@ export default function SignupPage() {
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-gradient-to-br from-blue-50 via-sky-50 to-indigo-100 px-4 pt-12 pb-24 sm:px-8 lg:px-16 xl:px-24 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-md scroll-reveal-scale">
         {/* Brand */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 shadow-lg shadow-blue-500/30 mb-4">
-            <Snowflake className="w-8 h-8 text-white" />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-500/10 dark:bg-blue-500/20 p-2.5 mb-4 ring-4 ring-blue-500/10">
+            <img src="/logo-icon.png" alt="Ahmed Cooling" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">{t.brandName}</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">{t.brandTagline}</p>
@@ -306,7 +312,7 @@ export default function SignupPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 disabled:opacity-60 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                  className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 disabled:opacity-60 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                   {t.signup}
@@ -316,7 +322,10 @@ export default function SignupPage() {
               {/* Sign In link */}
               <p className="text-center text-sm text-slate-500 dark:text-slate-400 mt-6">
                 {t.alreadyHaveAccount}{' '}
-                <Link href="/login" className="text-blue-600 dark:text-blue-400 font-semibold hover:underline">
+                <Link
+                  href={redirectUrl !== '/' ? `/login?redirect=${encodeURIComponent(redirectUrl)}` : '/login'}
+                  className="text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+                >
                   {t.signIn}
                 </Link>
               </p>
@@ -365,7 +374,7 @@ export default function SignupPage() {
               <button
                 onClick={handleVerify}
                 disabled={loading || otp.join('').length < 6}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 disabled:opacity-60 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 mb-4"
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 disabled:opacity-60 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 mb-4 cursor-pointer"
               >
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
                 {t.verifyOTP}
@@ -375,7 +384,7 @@ export default function SignupPage() {
               <button
                 onClick={handleResend}
                 disabled={resending}
-                className="inline-flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                className="inline-flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
                 <RefreshCw className={`w-4 h-4 ${resending ? 'animate-spin' : ''}`} />
                 {resending ? t.loading : t.sendOTP}
@@ -388,5 +397,17 @@ export default function SignupPage() {
         <p className="text-center text-xs text-slate-400 dark:text-slate-500 mt-6">© 2026 {t.brandName}</p>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-blue-50 dark:bg-slate-900">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+      </div>
+    }>
+      <SignupForm />
+    </Suspense>
   );
 }

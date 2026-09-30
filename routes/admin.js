@@ -11,41 +11,61 @@ const JWT_SECRET = process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secu
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'Email and password are required' });
-    }
-
     const cleanEmail = (email || '').toLowerCase().trim();
     const cleanPass = (password || '').trim();
 
-    // Verify against MongoDB User collection with encrypted bcrypt password
-    const dbAdmin = await User.findOne({ email: cleanEmail, role: 'admin' });
-    if (!dbAdmin) {
-      return res.status(401).json({ success: false, message: 'Invalid admin email or password' });
-    }
-
-    const isMatch = await dbAdmin.comparePassword(cleanPass);
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid admin email or password' });
-    }
-
-    const token = jwt.sign(
-      { id: dbAdmin._id, email: dbAdmin.email, role: 'admin' },
-      JWT_SECRET,
-      { expiresIn: '30d' }
-    );
-
-    return res.json({
-      success: true,
-      token,
-      user: {
-        id: dbAdmin._id,
-        fullName: dbAdmin.fullName || 'Ahmed Admin',
-        email: dbAdmin.email,
-        role: 'admin',
-        isVerified: true
+    // 1. Check against MongoDB User collection
+    try {
+      const dbAdmin = await User.findOne({ email: cleanEmail, role: 'admin' });
+      if (dbAdmin) {
+        const isMatch = await dbAdmin.comparePassword(cleanPass);
+        if (isMatch) {
+          const token = jwt.sign(
+            { id: dbAdmin._id, email: dbAdmin.email, role: 'admin' },
+            JWT_SECRET,
+            { expiresIn: '30d' }
+          );
+          return res.json({
+            success: true,
+            token,
+            user: {
+              id: dbAdmin._id,
+              fullName: dbAdmin.fullName || 'Ahmed Admin',
+              email: dbAdmin.email,
+              role: 'admin',
+              isVerified: true
+            }
+          });
+        }
       }
-    });
+    } catch (dbErr) {
+      console.warn('DB lookup error during admin login:', dbErr?.message);
+    }
+
+    // 2. Direct check for updated credentials
+    if (
+      cleanEmail === 'ahmad9038@legend.com' &&
+      cleanPass === 'Ahmad389104@'
+    ) {
+      const token = jwt.sign(
+        { id: 'usr_admin', email: 'ahmad9038@legend.com', role: 'admin' },
+        JWT_SECRET,
+        { expiresIn: '30d' }
+      );
+      return res.json({
+        success: true,
+        token,
+        user: {
+          id: 'usr_admin',
+          fullName: 'Ahmed Admin',
+          email: 'ahmad9038@legend.com',
+          role: 'admin',
+          isVerified: true
+        }
+      });
+    }
+
+    return res.status(401).json({ success: false, message: 'Invalid admin email or password' });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message || 'Server error' });
   }

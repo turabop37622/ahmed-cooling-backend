@@ -35,8 +35,9 @@ router.get('/profile', auth, async (req, res) => {
 // Update user profile
 router.put('/profile', auth, [
   body('name').optional().trim().notEmpty().withMessage('Name cannot be empty'),
+  body('fullName').optional().trim().notEmpty().withMessage('Full name cannot be empty'),
   body('email').optional().isEmail().withMessage('Please enter a valid email'),
-  body('phone').optional().matches(/^[0-9]{10,15}$/).withMessage('Please enter a valid phone number'),
+  body('phone').optional().matches(/^(\+?[0-9\s-]{8,20})$/).withMessage('Please enter a valid phone number'),
   body('address').optional().notEmpty().withMessage('Address cannot be empty')
 ], async (req, res) => {
   try {
@@ -45,7 +46,8 @@ router.put('/profile', auth, [
     if (!errors.isEmpty()) {
       return res.status(400).json({ 
         success: false, 
-        errors: errors.array() 
+        errors: errors.array(),
+        message: errors.array()[0]?.msg || 'Validation failed'
       });
     }
 
@@ -71,11 +73,12 @@ router.put('/profile', auth, [
     }
 
     // Update user
-    Object.keys(updates).forEach(key => {
-      if (key !== 'password') {
-        user[key] = updates[key];
-      }
-    });
+    if (updates.fullName) user.fullName = updates.fullName.trim();
+    if (updates.name && !updates.fullName) user.fullName = updates.name.trim();
+    if (updates.phone) user.phone = updates.phone.trim();
+    if (updates.address !== undefined) user.address = updates.address.trim();
+    if (updates.language) user.language = updates.language;
+    if (updates.email && updates.email !== user.email) user.email = updates.email.trim();
 
     await user.save();
 
@@ -84,7 +87,9 @@ router.put('/profile', auth, [
       message: 'Profile updated successfully',
       user: {
         id: user._id,
-        name: user.name,
+        _id: user._id,
+        fullName: user.fullName || user.name,
+        name: user.fullName || user.name,
         email: user.email,
         phone: user.phone,
         address: user.address,

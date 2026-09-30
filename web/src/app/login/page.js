@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Snowflake, Mail, Phone, Eye, EyeOff, Lock, AlertCircle, Loader2, ChevronDown } from 'lucide-react';
+import { Snowflake, Mail, Phone, Eye, EyeOff, Lock, AlertCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTranslation } from '../../contexts/TranslationContext';
 import { loginEmail, loginPhone } from '../../lib/api';
@@ -12,8 +12,12 @@ const COUNTRY_CODES = [
   { code: '+966', label: '🇸🇦 +966', phonePlaceholder: '5XXXXXXXX', regex: /^5\d{8}$/ },
 ];
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectUrl = searchParams.get('redirect') || '/';
+  const isVerifiedParam = searchParams.get('verified');
+
   const { login } = useAuth();
   const { t, language } = useTranslation();
 
@@ -25,8 +29,7 @@ export default function LoginPage() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [phonePassword, setPhonePassword] = useState('');
   const [showPhonePassword, setShowPhonePassword] = useState(false);
-  const [countryIdx, setCountryIdx] = useState(0);
-  const [ccOpen, setCcOpen] = useState(false);
+  const [countryIdx] = useState(0);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -44,7 +47,7 @@ export default function LoginPage() {
     try {
       const response = await loginEmail(email, password);
       login(response);
-      router.push('/');
+      router.push(redirectUrl);
     } catch (err) {
       const msg = err?.response?.data?.message || err?.response?.data?.error;
       if (msg?.toLowerCase().includes('verify') || msg?.toLowerCase().includes('verified')) {
@@ -63,7 +66,7 @@ export default function LoginPage() {
 
     if (!phoneNumber.trim()) return setError(t.valPhoneRequired);
     if (!country.regex.test(phoneNumber)) {
-      return setError(country.code === '+92' ? t.valPhonePk : t.valPhoneSa);
+      return setError(t.valPhoneSa);
     }
     if (!phonePassword) return setError(t.valPhonePasswordRequired);
 
@@ -72,7 +75,7 @@ export default function LoginPage() {
       const fullPhone = country.code + phoneNumber;
       const response = await loginPhone(fullPhone, phonePassword);
       login(response);
-      router.push('/');
+      router.push(redirectUrl);
     } catch (err) {
       const msg = err?.response?.data?.message || err?.response?.data?.error;
       setError(msg || t.authMsgLoginFailed);
@@ -97,7 +100,7 @@ export default function LoginPage() {
             return;
           }
           const popupUrl = popup.location.href;
-          if (popupUrl.includes('access_token=')) {
+          if (popupUrl && popupUrl.includes('access_token=')) {
             clearInterval(checkPopup);
             const hash = popupUrl.split('#')[1];
             const params = new URLSearchParams(hash);
@@ -116,7 +119,7 @@ export default function LoginPage() {
               provider: 'google',
             });
             login(response);
-            router.push('/');
+            router.push(redirectUrl);
           }
         } catch {}
       }, 500);
@@ -128,11 +131,11 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-gradient-to-br from-blue-50 via-sky-50 to-indigo-100 px-4 pt-12 pb-24 sm:px-8 lg:px-16 xl:px-24 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-md scroll-reveal-scale">
         {/* Brand */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 shadow-lg shadow-blue-500/30 mb-4">
-            <Snowflake className="w-8 h-8 text-white" />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-500/10 dark:bg-blue-500/20 p-2.5 mb-4 ring-4 ring-blue-500/10">
+            <img src="/logo-icon.png" alt="Ahmed Cooling" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">{t.brandName}</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">{t.brandTagline}</p>
@@ -141,6 +144,12 @@ export default function LoginPage() {
         {/* Card */}
         <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-xl shadow-blue-900/5 border border-slate-200/60 dark:border-slate-700 p-6 sm:p-8">
           <h2 className="text-xl font-semibold text-slate-800 dark:text-white text-center mb-6">{t.login}</h2>
+
+          {isVerifiedParam && (
+            <div className="mb-4 rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs font-bold text-emerald-700 text-center dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300">
+              {language === 'ar' ? 'تم تأكيد حسابك بنجاح! يرجى تسجيل الدخول.' : 'Account verified successfully! Please log in.'}
+            </div>
+          )}
 
           {/* Tabs */}
           <div className="flex bg-slate-100 dark:bg-slate-700 rounded-xl p-1 mb-6">
@@ -221,21 +230,19 @@ export default function LoginPage() {
               </div>
 
               <div className="text-right">
-                <Link href="/forgot-password" size="sm" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">{t.forgotPassword}</Link>
+                <Link href="/forgot-password" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">{t.forgotPassword}</Link>
               </div>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 disabled:opacity-60 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2"
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 disabled:opacity-60 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                 {t.login}
               </button>
             </form>
           )}
-
-          {/* Phone Tab - Coming Soon */}
 
           {/* Divider */}
           <div className="flex items-center gap-3 my-6">
@@ -247,7 +254,7 @@ export default function LoginPage() {
           {/* Google */}
           <button
             onClick={handleGoogleLogin}
-            className="w-full flex items-center justify-center gap-3 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-slate-600 transition shadow-sm"
+            className="w-full flex items-center justify-center gap-3 py-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-50 dark:hover:bg-slate-600 transition shadow-sm cursor-pointer"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
@@ -261,7 +268,10 @@ export default function LoginPage() {
           {/* Sign Up link */}
           <p className="text-center text-sm text-slate-500 dark:text-slate-400 mt-6">
             {t.dontHaveAccount}{' '}
-            <Link href="/signup" className="text-blue-600 dark:text-blue-400 font-semibold hover:underline">
+            <Link
+              href={redirectUrl !== '/' ? `/signup?redirect=${encodeURIComponent(redirectUrl)}` : '/signup'}
+              className="text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+            >
               {t.signup}
             </Link>
           </p>
@@ -271,5 +281,17 @@ export default function LoginPage() {
         <p className="text-center text-xs text-slate-400 dark:text-slate-500 mt-6">© 2026 {t.brandName}</p>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-blue-50 dark:bg-slate-900">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+      </div>
+    }>
+      <LoginForm />
+    </Suspense>
   );
 }

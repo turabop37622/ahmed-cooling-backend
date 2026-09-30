@@ -203,7 +203,101 @@ export default function AdminUsersPage() {
         </div>
       ) : (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* Mobile Card List (md:hidden) */}
+          <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800/80">
+            {filteredUsers.map((u) => {
+              const isAdmin = u.role === 'admin';
+              return (
+                <div key={u._id} className="p-4 space-y-3">
+                  {/* Top: Avatar, Name, Role */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div
+                        className={`w-10 h-10 rounded-xl font-bold flex items-center justify-center shrink-0 shadow-sm ${
+                          isAdmin
+                            ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-400'
+                            : 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400'
+                        }`}
+                      >
+                        {getInitials(u.name || u.fullName)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 truncate">
+                          <span>{u.name || u.fullName || 'User'}</span>
+                          {isAdmin && (
+                            <Shield className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-mono">ID: {u._id.slice(-6)}</span>
+                      </div>
+                    </div>
+                    <span
+                      className={`shrink-0 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider ${
+                        isAdmin
+                          ? 'bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-400 border border-purple-200 dark:border-purple-500/30'
+                          : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                      }`}
+                    >
+                      {isAdmin ? 'Admin' : 'Customer'}
+                    </span>
+                  </div>
+
+                  {/* Contact details */}
+                  <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-2.5 space-y-1 text-xs">
+                    {u.phone ? (
+                      <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                        <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <a href={`tel:${u.phone}`} className="font-mono text-blue-600 dark:text-blue-400 hover:underline inline-block" dir="ltr">
+                          {u.phone}
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-slate-400 text-xs">
+                        <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span>No phone</span>
+                      </div>
+                    )}
+                    {u.email && (
+                      <div className="flex items-center gap-2 text-slate-500 text-[11px] truncate">
+                        <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate">{u.email}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[10px] text-slate-400">
+                      {u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-GB') : 'Recent'}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {u.phone && (
+                        <a
+                          href={getWhatsAppUrl(u.phone, u.name)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 transition-all"
+                          title="WhatsApp"
+                        >
+                          <MessageCircle className="w-4 h-4" />
+                        </a>
+                      )}
+                      <button
+                        onClick={() => openUserDrawer(u)}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold text-xs transition-all"
+                      >
+                        <span>Details</span>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop Table (hidden md:block) */}
+          <div className="hidden md:block overflow-x-auto min-w-[700px]">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
@@ -252,7 +346,7 @@ export default function AdminUsersPage() {
                         <div className="space-y-1">
                           <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
                             <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span className="font-mono">{u.phone || 'No phone'}</span>
+                            <span className="font-mono select-all inline-block" dir="ltr">{u.phone || 'No phone'}</span>
                           </div>
                           <div className="flex items-center gap-1.5 text-slate-500 text-[11px]">
                             <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />

@@ -4,7 +4,16 @@ export default function robots() {
       {
         userAgent: '*',
         allow: '/',
-        disallow: ['/admin/', '/api/', '/bookings/', '/profile/'],
+        disallow: [
+          '/admin/',
+          '/api/',
+          '/bookings/',
+          '/profile/',
+          '/book/',
+          '/login',
+          '/signup',
+          '/forgot-password',
+        ],
       },
     ],
     sitemap: 'https://www.ahmedcoolingworkshop.com/sitemap.xml',

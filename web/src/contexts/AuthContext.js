@@ -13,8 +13,24 @@ export const AuthProvider = ({ children }) => {
     try {
       const savedToken = localStorage.getItem('token');
       const savedUser = localStorage.getItem('user');
-      if (savedToken) setToken(savedToken);
-      if (savedUser) setUser(JSON.parse(savedUser));
+      if (savedToken) {
+        // Check if token is expired by decoding the payload
+        try {
+          const payload = JSON.parse(atob(savedToken.split('.')[1]));
+          if (payload.exp && payload.exp * 1000 < Date.now()) {
+            // Token expired — clear storage
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+          } else {
+            setToken(savedToken);
+            if (savedUser) setUser(JSON.parse(savedUser));
+          }
+        } catch {
+          // Invalid token format — clear
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+        }
+      }
     } catch {}
     setLoading(false);
   }, []);

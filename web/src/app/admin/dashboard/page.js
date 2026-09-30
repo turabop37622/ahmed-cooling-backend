@@ -27,7 +27,45 @@ import {
   Wind,
   Zap,
   ShieldCheck,
+  MapPin,
+  Crosshair,
+  ExternalLink,
 } from 'lucide-react';
+
+function getBookingCoordinates(booking) {
+  if (!booking) return null;
+  let lat = null;
+  let lng = null;
+  if (booking.coordinates) {
+    if (typeof booking.coordinates.latitude === 'number' && booking.coordinates.latitude !== 0) {
+      lat = booking.coordinates.latitude;
+      lng = booking.coordinates.longitude;
+    } else if (Array.isArray(booking.coordinates) && booking.coordinates.length >= 2) {
+      lng = booking.coordinates[0];
+      lat = booking.coordinates[1];
+    }
+  }
+  if (!lat && typeof booking.latitude === 'number' && booking.latitude !== 0) {
+    lat = booking.latitude;
+    lng = booking.longitude;
+  }
+  if (!lat && typeof booking.address === 'string') {
+    const match = booking.address.match(/(-?\d+\.\d{3,})\s*,\s*(-?\d+\.\d{3,})/);
+    if (match) {
+      lat = parseFloat(match[1]);
+      lng = parseFloat(match[2]);
+    }
+  }
+  if (lat != null && lng != null && (lat !== 0 || lng !== 0)) {
+    return { latitude: Number(lat), longitude: Number(lng) };
+  }
+  return null;
+}
+
+function getBookingCurrency(b) {
+  if (b?.currency) return b.currency;
+  return 'SAR';
+}
 
 function renderServiceOutlineIcon(service, serviceName) {
   const text = ((service?.name || '') + ' ' + (serviceName || '') + ' ' + (service?.category || '')).toLowerCase();
@@ -257,7 +295,7 @@ export default function AdminDashboardPage() {
             Workshop Dashboard
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Real-time analytics and management for Jeddah & Makkah cooling services
+            Real-time analytics and management for Ahmed Cooling Workshop
           </p>
         </div>
 
@@ -348,7 +386,7 @@ export default function AdminDashboardPage() {
         <div className="p-6 border-b border-slate-100 dark:border-slate-800/80 flex items-center justify-between flex-wrap gap-3">
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">Recent Customer Requests</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Latest service bookings from Jeddah and Makkah</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Latest service bookings across Saudi Arabia</p>
           </div>
           <Link
             href="/admin/bookings"
@@ -388,6 +426,9 @@ export default function AdminDashboardPage() {
                         <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500">
                           #{bkg.orderNumber || bkg._id?.slice(-5).toUpperCase()}
                         </span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200/50">
+                            🇸🇦 KSA
+                          </span>
                       </div>
 
                       <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-1 flex-wrap">
@@ -404,18 +445,43 @@ export default function AdminDashboardPage() {
                         </span>
                       </div>
 
-                      {bkg.address && (
-                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 truncate max-w-xl">
-                          📍 {bkg.address}
-                        </p>
-                      )}
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        {bkg.address && (
+                          <span className="flex items-center gap-1 font-medium truncate max-w-md">
+                            <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                            <span>{bkg.address}</span>
+                          </span>
+                        )}
+                        {(() => {
+                          const coords = getBookingCoordinates(bkg);
+                          if (!coords) return null;
+                          const mapUrl = `https://www.google.com/maps?q=${coords.latitude},${coords.longitude}`;
+                          return (
+                            <div className="flex items-center gap-1.5">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded">
+                                <Crosshair className="w-2.5 h-2.5" />
+                                {coords.latitude.toFixed(4)}, {coords.longitude.toFixed(4)}
+                              </span>
+                              <a
+                                href={mapUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                              >
+                                <span>Map</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between md:justify-end gap-3 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100 dark:border-slate-800">
                     <div className="text-right">
                       <span className="block text-sm font-black text-slate-900 dark:text-white">
-                        {bkg.totalAmount ?? 150} SAR
+                        {bkg.totalAmount ?? 150} {getBookingCurrency(bkg)}
                       </span>
                       <span
                         className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${status.bg}`}

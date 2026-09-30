@@ -13,7 +13,7 @@ const axios = require('axios');
 // ============================================
 // CONFIG
 // ============================================
-const JWT_SECRET = process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token';
+const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'turabop37622@gmail.com';
 const BACKEND_URL = process.env.BACKEND_URL || 'https://ahmed-cooling-backend.onrender.com';
 
@@ -33,11 +33,11 @@ const auth = (req, res, next) => {
 };
 
 // ============================================
-// PHONE VALIDATION — Pakistan & Saudi Arabia only
+// PHONE VALIDATION — Pakistan, Saudi Arabia & Qatar
 // ============================================
 const validatePhone = (phone) => {
   const clean = phone.replace(/[^\d+]/g, '');
-  if (!clean.startsWith('+')) return { valid: false, msg: 'Phone must start with country code (+92 or +966)' };
+  if (!clean.startsWith('+')) return { valid: false, msg: 'Phone must start with country code (+92, +966, or +974)' };
 
   // Pakistan: +92 3XX XXXXXXX (total 13 chars)
   if (clean.startsWith('+92')) {
@@ -53,7 +53,14 @@ const validatePhone = (phone) => {
     return { valid: true };
   }
 
-  return { valid: false, msg: 'Only Pakistan (+92) and Saudi Arabia (+966) numbers are supported' };
+  // Qatar: +974 XXXX XXXX (8 digits starting with 3, 5, 6, or 7)
+  if (clean.startsWith('+974')) {
+    const local = clean.slice(4);
+    if (!/^[3567]\d{7}$/.test(local)) return { valid: false, msg: 'Qatar number must be +974 XXXXXXXX (8 digits starting with 3, 5, 6, or 7)' };
+    return { valid: true };
+  }
+
+  return { valid: false, msg: 'Only Pakistan (+92), Saudi Arabia (+966), and Qatar (+974) numbers are supported' };
 };
 
 const phoneValidator = (value) => {
@@ -303,7 +310,9 @@ const sendBookingCancellationEmail = async (data) => {
 // ============================================
 const sendAdminNotificationEmail = async (data) => {
   try {
-    const { bookingId, orderNumber, customerName, customerEmail, customerPhone, serviceName, serviceIcon, date, time, address, comments, servicePrice, visitCharges, totalAmount } = data;
+    const { bookingId, orderNumber, customerName, customerEmail, customerPhone, serviceName, serviceIcon, date, time, address, comments, servicePrice, visitCharges, totalAmount, country, currency } = data;
+    const currSymbol = currency || (customerPhone?.startsWith('+974') ? 'QAR' : 'SAR');
+    const countryName = country || (customerPhone?.startsWith('+974') ? 'Qatar' : 'Saudi Arabia');
 
     // ✅ Secure token - 7 din valid
     const actionToken = jwt.sign({ bookingId, action: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
@@ -313,19 +322,19 @@ const sendAdminNotificationEmail = async (data) => {
     await axios.post('https://api.brevo.com/v3/smtp/email', {
       sender: { name: "Ahmed Cooling - System", email: "turabop37622@gmail.com" },
       to: [{ email: ADMIN_EMAIL }],
-      subject: `🔔 New Booking: ${bookingId} | ${customerName} | ${serviceName}`,
+      subject: `🔔 New Booking: ${bookingId} | ${countryName === 'Qatar' ? '🇶🇦 Qatar' : '🇸🇦 Saudi'} | ${customerName} | ${serviceName}`,
       htmlContent: `
         <div style="font-family:Arial,sans-serif;max-width:650px;margin:auto;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.15);">
           
           <!-- Admin Header -->
           <div style="background:linear-gradient(135deg,#DC2626,#991B1B);padding:24px;text-align:center;">
             <h1 style="color:#fff;margin:0;font-size:22px;">🔔 New Booking Alert!</h1>
-            <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">Ahmed Cooling Admin Panel</p>
+            <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">Ahmed Cooling Admin Panel • ${countryName === 'Qatar' ? '🇶🇦 State of Qatar' : '🇸🇦 Kingdom of Saudi Arabia'}</p>
           </div>
 
           <!-- Alert -->
           <div style="background:#FEF3C7;padding:14px 24px;text-align:center;border-bottom:2px solid #FDE68A;">
-            <p style="color:#92400E;font-size:16px;font-weight:bold;margin:0;">⚡ Action Required - New Booking!</p>
+            <p style="color:#92400E;font-size:16px;font-weight:bold;margin:0;">⚡ Action Required - New Booking (${countryName})</p>
             <p style="color:#B45309;margin:4px 0 0;font-size:13px;">Booking ID: <strong>${bookingId}</strong></p>
           </div>
 
@@ -334,10 +343,11 @@ const sendAdminNotificationEmail = async (data) => {
             <!-- Customer Info -->
             <h3 style="color:#111827;font-size:15px;margin:0 0 12px;padding-bottom:8px;border-bottom:2px solid #E5E7EB;">👤 Customer Information</h3>
             <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
-              <tr style="background:#F9FAFB;"><td style="padding:10px 14px;font-size:13px;color:#6B7280;width:35%;">Full Name</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">${customerName}</td></tr>
-              <tr><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Email</td><td style="padding:10px 14px;font-size:14px;font-weight:600;"><a href="mailto:${customerEmail}" style="color:#3B82F6;">${customerEmail || 'N/A'}</a></td></tr>
-              <tr style="background:#F9FAFB;"><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Phone</td><td style="padding:10px 14px;font-size:14px;font-weight:600;"><a href="tel:${customerPhone}" style="color:#3B82F6;">${customerPhone}</a></td></tr>
-              <tr><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Address</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">${address}</td></tr>
+              <tr style="background:#F9FAFB;"><td style="padding:10px 14px;font-size:13px;color:#6B7280;width:35%;">Country</td><td style="padding:10px 14px;font-size:14px;font-weight:700;color:#1E40AF;">${countryName === 'Qatar' ? '🇶🇦 Qatar' : '🇸🇦 Saudi Arabia'}</td></tr>
+              <tr><td style="padding:10px 14px;font-size:13px;color:#6B7280;width:35%;">Full Name</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">${customerName}</td></tr>
+              <tr style="background:#F9FAFB;"><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Email</td><td style="padding:10px 14px;font-size:14px;font-weight:600;"><a href="mailto:${customerEmail}" style="color:#3B82F6;">${customerEmail || 'N/A'}</a></td></tr>
+              <tr><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Phone</td><td style="padding:10px 14px;font-size:14px;font-weight:600;"><a href="tel:${customerPhone}" style="color:#3B82F6;">${customerPhone}</a></td></tr>
+              <tr style="background:#F9FAFB;"><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Address</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">${address}</td></tr>
             </table>
 
             <!-- Booking Info -->
@@ -353,12 +363,13 @@ const sendAdminNotificationEmail = async (data) => {
             <!-- Price -->
             <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:16px;margin-bottom:28px;">
               <h3 style="color:#065F46;font-size:14px;margin:0 0 10px;">💰 Price Summary</h3>
-              <div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="font-size:13px;color:#374151;">Service Charge</span><span style="font-size:13px;">Rs. ${servicePrice || 0}</span></div>
-              <div style="display:flex;justify-content:space-between;margin-bottom:10px;"><span style="font-size:13px;color:#374151;">Visit Fee</span><span style="font-size:13px;">Rs. ${visitCharges || 50}</span></div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:6px;"><span style="font-size:13px;color:#374151;">Service Charge</span><span style="font-size:13px;">${currSymbol} ${servicePrice || 0}</span></div>
+              <div style="display:flex;justify-content:space-between;margin-bottom:10px;"><span style="font-size:13px;color:#374151;">Visit Fee</span><span style="font-size:13px;">${currSymbol} ${visitCharges || 50}</span></div>
               <div style="border-top:1px solid #BBF7D0;padding-top:10px;display:flex;justify-content:space-between;">
                 <span style="font-size:15px;font-weight:bold;color:#065F46;">Total Amount</span>
-                <span style="font-size:20px;font-weight:bold;color:#059669;">Rs. ${totalAmount}</span>
+                <span style="font-size:20px;font-weight:bold;color:#059669;">${currSymbol} ${totalAmount}</span>
               </div>
+            </div>
             </div>
 
             <!-- ✅ ACTION BUTTONS -->
@@ -711,7 +722,15 @@ router.post('/public', [
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array(), message: errors.array()[0].msg });
 
-    const { customerName, phone, email, service, date, time, address, comments, coordinates, placeId, platform, language, userId, userEmail, userName } = req.body;
+    const {
+      customerName, phone, email, service, date, time, address, comments,
+      coordinates, placeId, platform, language, userId, userEmail, userName,
+      country, city, currency,
+    } = req.body;
+
+    const detectedCountry = country || (phone?.trim().startsWith('+974') ? 'Qatar' : 'Saudi Arabia');
+    const detectedCurrency = currency || (detectedCountry === 'Qatar' ? 'QAR' : 'SAR');
+    const detectedCity = city?.trim() || '';
 
     let validUserId = null;
     if (userId) {
@@ -736,23 +755,29 @@ router.post('/public', [
       email: finalEmail,
       service, date, time,
       address: address.trim(),
+      country: detectedCountry,
+      city: detectedCity,
+      currency: detectedCurrency,
       comments: comments?.trim() || '',
       coordinates: coordinates || { latitude: 0, longitude: 0 },
       placeId: placeId || '',
-      platform: platform || 'android',
+      platform: platform || 'web',
       language: language || 'en',
       status: 'pending',
       servicePrice, visitCharges, totalAmount,
       statusHistory: [{ status: 'pending', timestamp: new Date(), note: validUserId ? `User: ${userName || customerName}` : 'Guest booking' }],
     });
 
-    console.log('✅ Booking created:', bookingId);
+    console.log('✅ Booking created:', bookingId, `(${detectedCountry})`);
 
     const emailData = {
       bookingId, orderNumber,
       customerName: customerName.trim(),
       customerEmail: finalEmail,
       customerPhone: phone.trim(),
+      country: detectedCountry,
+      city: detectedCity,
+      currency: detectedCurrency,
       serviceName: service.name || service.titleKey || 'AC Service',
       serviceIcon: service.icon || '❄️',
       date, time,

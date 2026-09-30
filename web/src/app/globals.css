@@ -10,7 +10,8 @@
   --color-text: #0F172A;
   --color-sub: #64748B;
   --color-border: #E2E8F0;
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-plus-jakarta-sans), 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-arabic: var(--font-ibm-plex-arabic), 'IBM Plex Sans Arabic', var(--font-tajawal), 'Tajawal', 'Almarai', system-ui, -apple-system, sans-serif;
 }
 
 html {
@@ -18,9 +19,47 @@ html {
 }
 
 body {
-  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  font-family: var(--font-plus-jakarta-sans), 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+[dir="rtl"],
+[dir="rtl"] body {
+  font-family: var(--font-ibm-plex-arabic), 'IBM Plex Sans Arabic', var(--font-tajawal), 'Tajawal', 'Almarai', system-ui, -apple-system, sans-serif;
+}
+
+/* English Typography: Word spacing and letter spacing */
+[dir="ltr"],
+html[dir="ltr"] body {
+  word-spacing: 0.09em;
+  letter-spacing: 0.015em;
+}
+
+[dir="ltr"] h1,
+[dir="ltr"] h2,
+[dir="ltr"] h3,
+[dir="ltr"] h4,
+[dir="ltr"] h5,
+[dir="ltr"] h6 {
+  word-spacing: 0.14em;
+  letter-spacing: 0.015em;
+}
+
+[dir="ltr"] .tracking-tight {
+  letter-spacing: 0.01em !important;
+  word-spacing: 0.14em !important;
+}
+
+[dir="ltr"] p {
+  word-spacing: 0.08em;
+  letter-spacing: 0.01em;
+}
+
+[dir="ltr"] a,
+[dir="ltr"] button {
+  word-spacing: 0.08em;
+  letter-spacing: 0.015em;
 }
 
 .dark {
@@ -43,4 +82,134 @@ body {
 @keyframes marquee-rtl {
   0% { transform: translateX(0); }
   100% { transform: translateX(50%); }
+}
+
+/* Hide scrollbar utility for Chrome, Safari, Edge, Firefox, and Opera */
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.no-scrollbar,
+.scrollbar-none {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+/* Respect user preference for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee {
+    animation: none !important;
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════
+   HIGH-PERFORMANCE SCROLL REVEAL ANIMATIONS
+   ═════════════════════════════════════════════════════════════ */
+
+/* Base transition parameters */
+.scroll-reveal,
+.scroll-reveal-scale,
+.scroll-reveal-left,
+.scroll-reveal-right,
+.scroll-reveal-fade {
+  opacity: 0;
+  transition-property: opacity, transform;
+  transition-duration: 0.8s;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity, transform;
+}
+
+/* 1. Fade Up (default) */
+.scroll-reveal {
+  transform: translate3d(0, 36px, 0);
+}
+.scroll-reveal.revealed {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+/* 2. Scale In (cards, impact boxes) */
+.scroll-reveal-scale {
+  transform: scale3d(0.92, 0.92, 1) translate3d(0, 20px, 0);
+}
+.scroll-reveal-scale.revealed {
+  opacity: 1;
+  transform: scale3d(1, 1, 1) translate3d(0, 0, 0);
+}
+
+/* 3. Slide Left -> Right */
+.scroll-reveal-left {
+  transform: translate3d(-36px, 0, 0);
+}
+.scroll-reveal-left.revealed {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+/* 4. Slide Right -> Left */
+.scroll-reveal-right {
+  transform: translate3d(36px, 0, 0);
+}
+.scroll-reveal-right.revealed {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+/* 5. Pure Fade */
+.scroll-reveal-fade {
+  transform: none;
+}
+.scroll-reveal-fade.revealed {
+  opacity: 1;
+}
+
+/* RTL Direction adjustments */
+[dir="rtl"] .scroll-reveal-left {
+  transform: translate3d(36px, 0, 0);
+}
+[dir="rtl"] .scroll-reveal-left.revealed {
+  transform: translate3d(0, 0, 0);
+}
+[dir="rtl"] .scroll-reveal-right {
+  transform: translate3d(-36px, 0, 0);
+}
+[dir="rtl"] .scroll-reveal-right.revealed {
+  transform: translate3d(0, 0, 0);
+}
+
+/* Stagger Delay Utilities */
+.delay-75  { transition-delay: 75ms; }
+.delay-100 { transition-delay: 100ms; }
+.delay-150 { transition-delay: 150ms; }
+.delay-200 { transition-delay: 200ms; }
+.delay-250 { transition-delay: 250ms; }
+.delay-300 { transition-delay: 300ms; }
+.delay-350 { transition-delay: 350ms; }
+.delay-400 { transition-delay: 400ms; }
+.delay-500 { transition-delay: 500ms; }
+.delay-600 { transition-delay: 600ms; }
+
+/* Subtle pulse for key badges */
+@keyframes pulse-subtle {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+.animate-pulse-subtle {
+  animation: pulse-subtle 3s ease-in-out infinite;
+}
+
+/* Disable for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .scroll-reveal,
+  .scroll-reveal-scale,
+  .scroll-reveal-left,
+  .scroll-reveal-right,
+  .scroll-reveal-fade {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
 }

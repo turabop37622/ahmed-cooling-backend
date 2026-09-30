@@ -37,14 +37,16 @@ export const TranslationProvider = ({ children }) => {
     return String(val).replace(/[0-9]/g, (d) => '٠١٢٣٤٥٦٧٨٩'[d]);
   };
 
-  const formatPrice = (amountSAR) => {
-    const sar = Number(amountSAR || 0);
+  const formatPrice = (amount, currency = 'SAR') => {
+    const num = Number(amount || 0);
+    const currUpper = String(currency || 'SAR').toUpperCase();
     if (language === 'ar') {
-      const formatted = sar.toLocaleString();
+      const formatted = num.toLocaleString();
       const arNum = formatted.replace(/[0-9]/g, (d) => '٠١٢٣٤٥٦٧٨٩'[d]);
-      return `${arNum} ﷼`;
+      const symbol = 'ر.س';
+      return `${arNum} ${symbol}`;
     }
-    return `SAR ${sar.toLocaleString()}`;
+    return `${currUpper} ${num.toLocaleString()}`;
   };
 
   return (

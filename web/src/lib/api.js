@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = 'https://ahmed-cooling-backend.onrender.com/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://ahmed-cooling-backend.onrender.com/api';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -134,6 +134,18 @@ export const getPublicReviews = async () => {
 // User
 export const updateProfile = async (data) => {
   const res = await api.put('/users/profile', data);
+  return res.data;
+};
+
+// Contact Inquiry
+export const submitContact = async (data) => {
+  const res = await api.post('/contact', data);
+  return res.data;
+};
+
+// General Rating & Feedback
+export const submitGeneralRating = async (data) => {
+  const res = await api.post('/rate', data);
   return res.data;
 };
 

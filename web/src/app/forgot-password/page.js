@@ -96,8 +96,8 @@ export default function ForgotPasswordPage() {
       <div className="w-full max-w-md">
         {/* Brand */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 shadow-lg shadow-blue-500/30 mb-4">
-            <Snowflake className="w-8 h-8 text-white" />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-500/10 dark:bg-blue-500/20 p-2.5 mb-4 ring-4 ring-blue-500/10">
+            <img src="/logo-icon.png" alt="Ahmed Cooling" className="w-full h-full object-contain" />
           </div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">{t.brandName}</h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">{t.brandTagline}</p>

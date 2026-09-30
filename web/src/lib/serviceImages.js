@@ -9,13 +9,13 @@ export const SERVICE_IMAGES = {
   'AC Deep Cleaning': '/services/ac-cleaning.jpg',
   'AC Gas Refill': '/services/ac-gas-refill.jpg',
   'AC Compressor Repair': '/services/ac-repair.jpg',
-  'AC PCB Repair': '/services/electrical-repair.jpg',
+  'AC PCB Repair': '/services/ac-pcb-repair.jpg',
   'AC Shifting': '/services/ac-installation.jpg',
   'Central AC Service': '/services/central-ac.jpg',
 
   // Refrigerator & Freezer Services
   'Refrigerator Repair': '/services/refrigerator-repair.jpg',
-  'Freezer Repair': '/services/refrigerator-repair.jpg',
+  'Freezer Repair': '/services/freezer-repair.jpg',
   'Fridge Gas Refill': '/services/refrigerator-repair.jpg',
   'Fridge Thermostat Fix': '/services/refrigerator-repair.jpg',
 
