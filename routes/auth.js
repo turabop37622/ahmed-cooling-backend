@@ -1,24 +1,27 @@
 const sendEmail = require('../utils/sendEmail');
-const sendSMS   = require('../utils/sendSMS');
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const axios = require('axios');
 const User = require('../models/User');
-const { body, validationResult } = require('express-validator');
+const { normalizePhone, phoneVariants, validatePhone } = require('../utils/phone');
+const { cleanStr, normEmail, isEmail, isValidPassword, burnPasswordCheck, PASSWORD_MIN, PASSWORD_MAX } = require('../utils/security');
+const { PURPOSE_VERIFY, PURPOSE_RESET, canIssueOtp, issueOtp, clearOtp, checkOtp, saveQuiet } = require('../utils/otp');
 
 const JWT_SECRET = process.env.JWT_SECRET;
+// The Google client ID is public (it is embedded in the website), so a default is safe.
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '506685890879-rcuen5qa0bom1f4asc89ah29k8ernt59.apps.googleusercontent.com';
+// Extra client IDs (e.g. Android/iOS apps) can be listed in GOOGLE_CLIENT_IDS, comma separated.
+const GOOGLE_AUDIENCES = [GOOGLE_CLIENT_ID, ...(process.env.GOOGLE_CLIENT_IDS || '').split(',').map((v) => v.trim()).filter(Boolean)];
 
 const generateToken = (user) => {
   return jwt.sign(
     { id: user._id, email: user.email, role: user.role },
     JWT_SECRET,
-    { expiresIn: '30d' }
+    { algorithm: 'HS256', expiresIn: user.role === 'admin' ? '8h' : '30d' }
   );
 };
 
-// ─────────────────────────────────────────
-//  Helper: standard user response object
-// ─────────────────────────────────────────
 const userResponse = (user) => ({
   id:       user._id.toString(),
   _id:      user._id.toString(),
@@ -31,153 +34,114 @@ const userResponse = (user) => ({
   authProvider:    user.authProvider   || 'local',
 });
 
-// ================================
-// PHONE VALIDATION — PK & SA only
-// ================================
-const validatePhoneNumber = (phone) => {
-  if (!phone) return { valid: false, msg: 'Phone number is required' };
-  const clean = phone.replace(/[^\d+]/g, '');
-  if (clean.startsWith('+92')) {
-    return /^\+923\d{9}$/.test(clean) ? { valid: true } : { valid: false, msg: 'Pakistan: +92 3XX XXXXXXX' };
-  }
-  if (clean.startsWith('+966')) {
-    return /^\+9665\d{8}$/.test(clean) ? { valid: true } : { valid: false, msg: 'Saudi: +966 5X XXXXXXXX' };
-  }
-  if (clean.startsWith('+974')) {
-    return /^\+974[3567]\d{7}$/.test(clean) ? { valid: true } : { valid: false, msg: 'Qatar: +974 XXXX XXXX (8 digits starting with 3, 5, 6, or 7)' };
-  }
-  return { valid: false, msg: 'Only Pakistan (+92), Saudi Arabia (+966), and Qatar (+974) numbers allowed' };
-};
-
-const axios = require('axios');
-
 const DISPOSABLE_EMAIL_DOMAINS = [
   'tempmail.com', 'mailinator.com', 'guerrillamail.com', 'yopmail.com', '10minutemail.com',
   'trashmail.com', 'temp-mail.org', 'dispostable.com', 'getnada.com', 'dropmail.me',
   'guerrillamail.biz', 'guerrillamail.de', 'guerrillamail.net', 'guerrillamail.org',
   'guerrillamailblock.com', 'spam4.me', 'grr.la', 'teleworm.us', 'dayrep.com', 'fleeing.cc',
-  'gixpos.com', 'vintomland.com', 'tempm.com', 'mail.tm', 'mail.gw', 'moakt.com', 'dispostable.com'
+  'gixpos.com', 'vintomland.com', 'tempm.com', 'mail.tm', 'mail.gw', 'moakt.com',
 ];
 
 const isDisposableEmail = async (email) => {
   if (!email) return false;
-  
-  // 1. Check local list first (fast)
   const domain = email.split('@')[1]?.toLowerCase();
   if (DISPOSABLE_EMAIL_DOMAINS.includes(domain)) return true;
-
-  // 2. Check Kickbox API (reliable)
   try {
-    const response = await axios.get(`https://open.kickbox.com/v1/disposable/${email}`, { timeout: 3000 });
+    // Only the domain is sent to the third-party checker (not the whole address).
+    const response = await axios.get(`https://open.kickbox.com/v1/disposable/${encodeURIComponent(domain)}`, { timeout: 3000 });
     return response.data.disposable === true;
-  } catch (error) {
-    console.log('⚠️ Kickbox API error, using local list check only');
+  } catch {
     return false;
+  }
+};
+
+const maskEmail = (email) => {
+  const [name, domain] = email.split('@');
+  return `${name.slice(0, 2)}***@${domain}`;
+};
+
+const invalidCode = (res) => res.status(400).json({ success: false, message: 'Invalid or expired code' });
+
+// An account that never finished sign-up (email not verified, phone never verified) has never proved it
+// belongs to anybody, so a new sign-up may replace it. Verified accounts are never touched.
+const isStaleUnverified = (user) => !!user && !user.isVerified && !user.isPhoneVerified && user.role === 'customer';
+
+const removeStale = async (...users) => {
+  const seen = new Set();
+  for (const user of users) {
+    if (user && !seen.has(String(user._id))) {
+      seen.add(String(user._id));
+      await User.deleteOne({ _id: user._id });
+    }
   }
 };
 
 // ================================
 // EMAIL: REGISTER
 // ================================
-router.post('/register', [
-  body('email').isEmail().withMessage('Please enter a valid email'),
-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-], async (req, res) => {
+router.post('/register', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, errors: errors.array() });
+    const email = normEmail(req.body.email);
+    const userName = cleanStr(req.body.fullName || req.body.name, 100);
+    const { password } = req.body;
+    const phone = cleanStr(req.body.phone, 30);
+    const address = cleanStr(req.body.address, 500);
+
+    if (!isEmail(email)) return res.status(400).json({ success: false, message: 'Please enter a valid email' });
+    if (!isValidPassword(password)) {
+      return res.status(400).json({ success: false, message: `Password must be ${PASSWORD_MIN} to ${PASSWORD_MAX} characters` });
     }
-
-    const { fullName, name, email, password, phone, address } = req.body;
-    const userName = fullName || name;
-
-    if (!userName || !userName.trim()) {
-      return res.status(400).json({ success: false, message: 'Full name is required' });
-    }
-
+    if (!userName) return res.status(400).json({ success: false, message: 'Full name is required' });
+    if (!phone) return res.status(400).json({ success: false, message: 'Phone number is required' });
+    const phoneCheck = validatePhone(phone);
+    if (!phoneCheck.valid) return res.status(400).json({ success: false, message: phoneCheck.msg });
     if (await isDisposableEmail(email)) {
       return res.status(400).json({ success: false, message: 'Disposable email addresses are not allowed. Please use a permanent email.' });
     }
 
-    if (!phone) {
-      return res.status(400).json({ success: false, message: 'Phone number is required' });
-    }
+    const normalizedPhone = normalizePhone(phone);
 
-    const phoneCheck = validatePhoneNumber(phone);
-    if (!phoneCheck.valid) {
-      return res.status(400).json({ success: false, message: phoneCheck.msg });
-    }
-
+    // Look at both first and only delete stale rows once we know the sign-up can go ahead.
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    const existingPhone = await User.findOne({ phone: { $in: phoneVariants(phone) } });
+    if (existingUser && !isStaleUnverified(existingUser)) {
       return res.status(400).json({ success: false, message: 'User already exists with this email' });
     }
-
-    const existingPhone = await User.findOne({ phone });
-    if (existingPhone) {
+    if (existingPhone && !isStaleUnverified(existingPhone)) {
       return res.status(400).json({ success: false, message: 'This phone number is already registered' });
     }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    await removeStale(existingUser, existingPhone);
 
     const user = new User({
       fullName: userName,
       email,
       password,
-      phone,
-      address:  address || '',
-      otp,
-      otpExpires:   new Date(Date.now() + 10 * 60 * 1000),
-      isVerified:   false,
-      authProvider: 'local'
+      phone: normalizedPhone,
+      address,
+      isVerified: false,
+      authProvider: 'local',
     });
-
     await user.save();
-    console.log('✅ User saved');
+    const otp = await issueOtp(user, PURPOSE_VERIFY);
 
-    let otpSentVia = 'console';
-
-    // SMS OTP (primary), email fallback
-    if (phone) {
-      try {
-        await sendSMS(phone, otp);
-        otpSentVia = 'sms';
-        console.log('✅ OTP sent via SMS to:', phone);
-      } catch (smsErr) {
-        console.log('❌ SMS failed, trying email:', smsErr.message);
-        try {
-          await sendEmail(email, otp);
-          otpSentVia = 'email';
-          console.log('✅ OTP fallback email sent to:', email);
-        } catch (emailErr) {
-          console.log('❌ Email also failed:', emailErr.message);
-        }
-      }
-    } else {
-      try {
-        await sendEmail(email, otp);
-        otpSentVia = 'email';
-      } catch (emailErr) {
-        console.log('❌ Email send failed:', emailErr.message);
-      }
+    // The code goes to the email address, which proves the person owns it.
+    try {
+      await sendEmail(email, otp, PURPOSE_VERIFY);
+    } catch (emailErr) {
+      console.error('❌ Verification email failed:', emailErr.message);
+      return res.status(502).json({ success: false, message: 'Could not send the verification code. Please try again.' });
     }
-
-    const maskedPhone = phone ? phone.slice(0, 4) + '****' + phone.slice(-3) : null;
 
     res.status(201).json({
       success: true,
-      message: otpSentVia === 'sms'
-        ? `OTP sent to your phone (${maskedPhone})`
-        : 'OTP sent to your email.',
+      message: 'OTP sent to your email.',
       email,
-      phone: maskedPhone,
-      otpSentVia,
+      phone: normalizedPhone.slice(0, 4) + '****' + normalizedPhone.slice(-3),
+      otpSentVia: 'email',
     });
-
   } catch (error) {
     console.error('❌ Registration error:', error);
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -186,32 +150,23 @@ router.post('/register', [
 // ================================
 router.post('/verify-otp', async (req, res) => {
   try {
-    const { email, phone, otp } = req.body;
-    const identifier = email || phone;
-    console.log('🔍 Verifying OTP for:', identifier);
+    const email = normEmail(req.body.email);
+    const phone = typeof req.body.phone === 'string' ? req.body.phone : '';
+    const { otp } = req.body;
+    if (!email && !phone) return invalidCode(res);
 
+    // By phone number only for accounts created through phone sign-up; email accounts verify by email.
     const user = email
       ? await User.findOne({ email })
-      : await User.findOne({ phone });
-
-    if (!user) return res.status(400).json({ success: false, message: 'User not found' });
-
-    if (!user.otp || user.otp !== otp) {
-      return res.status(400).json({ success: false, message: 'Invalid OTP' });
-    }
-
-    if (user.otpExpires < new Date()) {
-      return res.status(400).json({ success: false, message: 'OTP expired. Please request a new one.' });
-    }
+      : await User.findOne({ phone: { $in: phoneVariants(phone) }, authProvider: 'phone' });
+    if (!user || (user.isVerified && user.isPhoneVerified)) return invalidCode(res);
+    if (!(await checkOtp(user, otp, PURPOSE_VERIFY))) return invalidCode(res);
 
     user.isVerified = true;
-    if (phone || user.authProvider === 'phone') {
-      user.isPhoneVerified = true;
-    }
-    user.otp        = undefined;
-    user.otpExpires = undefined;
-    await user.save();
-    console.log('✅ User verified:', identifier);
+    // "phone verified" only means the person finished phone sign-up (the code is emailed, not texted).
+    if (user.authProvider === 'phone') user.isPhoneVerified = true;
+    clearOtp(user);
+    await saveQuiet(user);
 
     const token = generateToken(user);
     return res.status(200).json({
@@ -221,7 +176,6 @@ router.post('/verify-otp', async (req, res) => {
       userId: user._id.toString(),
       user: userResponse(user),
     });
-
   } catch (error) {
     console.error('❌ Verify OTP error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -229,48 +183,29 @@ router.post('/verify-otp', async (req, res) => {
 });
 
 // ================================
-// EMAIL: RESEND OTP
+// RESEND OTP (always answers the same, so it cannot be used to find registered emails)
 // ================================
 router.post('/resend-otp', async (req, res) => {
+  const generic = { success: true, message: 'If this account still needs verification, a new code has been sent.', otpSentVia: 'email' };
   try {
-    const { email, phone } = req.body;
+    const email = normEmail(req.body.email);
+    const phone = typeof req.body.phone === 'string' ? req.body.phone : '';
+    if (!email && !phone) return res.status(200).json(generic);
 
     const user = email
       ? await User.findOne({ email })
-      : await User.findOne({ phone });
+      : await User.findOne({ phone: { $in: phoneVariants(phone) }, authProvider: 'phone' });
 
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (user.isVerified && user.isPhoneVerified) return res.status(400).json({ success: false, message: 'User already verified' });
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    user.otp        = otp;
-    user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
-    await user.save();
-
-    let otpSentVia = 'console';
-    const userPhone = user.phone || phone;
-
-    if (userPhone) {
-      try {
-        await sendSMS(userPhone, otp);
-        otpSentVia = 'sms';
-        console.log('✅ OTP resent via SMS to:', userPhone);
-      } catch (smsErr) {
-        console.log('❌ SMS resend failed:', smsErr.message);
-        if (user.email) {
-          try { await sendEmail(user.email, otp); otpSentVia = 'email'; } catch {}
-        }
-      }
-    } else if (user.email) {
-      try { await sendEmail(user.email, otp); otpSentVia = 'email'; } catch {}
+    if (!user || user.isVerified || user.role !== 'customer' || !user.email || !canIssueOtp(user)) {
+      return res.status(200).json(generic);
     }
-
-    res.status(200).json({
-      success: true,
-      message: otpSentVia === 'sms' ? 'OTP resent to your phone' : 'OTP resent to your email',
-      otpSentVia,
-    });
-
+    const otp = await issueOtp(user, PURPOSE_VERIFY);
+    try {
+      await sendEmail(user.email, otp, PURPOSE_VERIFY);
+    } catch (emailErr) {
+      console.error('❌ Resend email failed:', emailErr.message);
+    }
+    res.status(200).json(generic);
   } catch (error) {
     console.error('❌ Resend OTP error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -280,31 +215,29 @@ router.post('/resend-otp', async (req, res) => {
 // ================================
 // EMAIL: LOGIN
 // ================================
-router.post('/login', [
-  body('email').isEmail().withMessage('Please enter a valid email'),
-  body('password').notEmpty().withMessage('Password is required')
-], async (req, res) => {
+router.post('/login', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, errors: errors.array() });
+    const email = normEmail(req.body.email);
+    const { password } = req.body;
+    if (!isEmail(email)) return res.status(400).json({ success: false, message: 'Please enter a valid email' });
+    if (typeof password !== 'string' || !password || password.length > 200) {
+      return res.status(400).json({ success: false, message: 'Password is required' });
     }
 
-    const { email, password } = req.body;
-
     const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ success: false, message: 'Invalid email or password' });
-
-    if (!user.isVerified) {
-      return res.status(403).json({ success: false, message: 'Please verify your email first', email });
+    if (!user) {
+      await burnPasswordCheck(password);
+      return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(401).json({ success: false, message: 'Invalid email or password' });
 
-    const token = generateToken(user);
-    console.log('✅ Login successful:', email, 'ID:', user._id);
+    if (!user.isVerified) {
+      return res.status(403).json({ success: false, message: 'Please verify your email first', email });
+    }
 
+    const token = generateToken(user);
     res.json({
       success: true,
       message: 'Login successful',
@@ -312,7 +245,6 @@ router.post('/login', [
       userId: user._id.toString(),
       user: userResponse(user),
     });
-
   } catch (error) {
     console.error('❌ Login error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -320,97 +252,86 @@ router.post('/login', [
 });
 
 // ================================
-// PHONE: REGISTER — OTP via email (FREE)
+// PHONE: REGISTER — OTP via email
 // ================================
 router.post('/phone/register', async (req, res) => {
   try {
-    const { fullName, name, phone, password, email } = req.body;
-    const userName = fullName || name;
+    const userName = cleanStr(req.body.fullName || req.body.name, 100);
+    const phone = cleanStr(req.body.phone, 30);
+    const email = normEmail(req.body.email);
+    const { password } = req.body;
 
     if (!userName || !phone || !password) {
       return res.status(400).json({ success: false, message: 'Name, phone and password are required' });
     }
-    if (!email) {
-      return res.status(400).json({ success: false, message: 'Email is required for OTP verification' });
+    if (!isEmail(email)) return res.status(400).json({ success: false, message: 'A valid email is required for OTP verification' });
+    if (!isValidPassword(password)) {
+      return res.status(400).json({ success: false, message: `Password must be ${PASSWORD_MIN} to ${PASSWORD_MAX} characters` });
     }
-
+    const phoneCheck = validatePhone(phone);
+    if (!phoneCheck.valid) return res.status(400).json({ success: false, message: phoneCheck.msg });
     if (await isDisposableEmail(email)) {
       return res.status(400).json({ success: false, message: 'Disposable email addresses are not allowed. Please use a permanent email.' });
     }
 
-    const phoneCheck = validatePhoneNumber(phone);
-    if (!phoneCheck.valid) {
-      return res.status(400).json({ success: false, message: phoneCheck.msg });
-    }
+    const normalizedPhone = normalizePhone(phone);
 
-    let user = await User.findOne({ phone });
-    if (user && user.isPhoneVerified) {
+    // An existing account is never overwritten — only accounts that never finished sign-up are replaced.
+    const existingPhone = await User.findOne({ phone: { $in: phoneVariants(phone) } });
+    const existingEmail = await User.findOne({ email });
+    if (existingPhone && !isStaleUnverified(existingPhone)) {
       return res.status(409).json({ success: false, message: 'Phone already registered. Please sign in.' });
     }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    if (user) {
-      user.fullName = userName;
-      user.password = password;
-      user.email = email;
-      user.otp = otp;
-      user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
-      await user.save();
-    } else {
-      user = new User({
-        fullName: userName, phone, email, password,
-        authProvider: 'phone', isPhoneVerified: false, isVerified: false,
-        otp, otpExpires: new Date(Date.now() + 10 * 60 * 1000),
-      });
-      await user.save();
+    if (existingEmail && !isStaleUnverified(existingEmail)) {
+      return res.status(409).json({ success: false, message: 'This email is already registered. Please sign in.' });
     }
+    await removeStale(existingPhone, existingEmail);
 
-    console.log('✅ Phone user saved');
+    const user = new User({
+      fullName: userName, phone: normalizedPhone, email, password,
+      authProvider: 'phone', isPhoneVerified: false, isVerified: false,
+    });
+    await user.save();
+    const otp = await issueOtp(user, PURPOSE_VERIFY);
 
     try {
-      await sendEmail(email, otp);
-      console.log('✅ OTP email sent to:', email);
+      await sendEmail(email, otp, PURPOSE_VERIFY);
     } catch (emailErr) {
-      console.log('❌ Email failed:', emailErr.message);
+      console.error('❌ Verification email failed:', emailErr.message);
+      return res.status(502).json({ success: false, message: 'Could not send the verification code. Please try again.' });
     }
 
     res.status(201).json({ success: true, message: 'OTP sent to your email.' });
-
   } catch (error) {
     console.error('❌ Phone register error:', error);
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
 // ================================
-// PHONE: LOGIN  ← NEW
+// PHONE: LOGIN
 // ================================
 router.post('/phone/login', async (req, res) => {
   try {
     const { phone, password } = req.body;
-
-    if (!phone || !password) {
+    if (typeof phone !== 'string' || typeof password !== 'string' || !phone || !password || password.length > 200) {
       return res.status(400).json({ success: false, message: 'Phone and password are required' });
     }
 
-    const user = await User.findOne({ phone });
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
-    }
+    const user = await User.findOne({ phone: { $in: phoneVariants(phone) } });
+    if (!user) return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
 
+    const isMatch = await user.comparePassword(password);
+    if (!isMatch) return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
+
+    if (user.authProvider !== 'phone') {
+      return res.status(403).json({ success: false, message: 'Phone sign-in is not set up for this account. Please sign in with your email.' });
+    }
     if (!user.isPhoneVerified) {
       return res.status(403).json({ success: false, message: 'Phone not verified. Please complete registration.' });
     }
 
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
-    }
-
     const token = generateToken(user);
-    console.log('✅ Phone login successful:', phone, 'ID:', user._id);
-
     res.json({
       success: true,
       message: 'Login successful',
@@ -418,7 +339,6 @@ router.post('/phone/login', async (req, res) => {
       userId: user._id.toString(),
       user: userResponse(user),
     });
-
   } catch (error) {
     console.error('❌ Phone login error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -426,147 +346,136 @@ router.post('/phone/login', async (req, res) => {
 });
 
 // ================================
-// SOCIAL LOGIN
-// ================================
-// ================================
-// SOCIAL LOGIN — FIXED
+// SOCIAL LOGIN (Google) — token is verified with Google, never trusted from the client
 // ================================
 router.post('/social', async (req, res) => {
   try {
-    const { email, fullName, provider, googleId, picture } = req.body;
-
-    if (!email || !provider) {
-      return res.status(400).json({ success: false, message: 'Email and provider are required' });
+    const { accessToken } = req.body;
+    if (typeof accessToken !== 'string' || !accessToken) {
+      return res.status(400).json({ success: false, message: 'Google login is not configured' });
+    }
+    const tokenInfo = await axios.get('https://oauth2.googleapis.com/tokeninfo', {
+      params: { access_token: accessToken }, timeout: 5000,
+    });
+    if (!GOOGLE_AUDIENCES.includes(tokenInfo.data.aud) || Number(tokenInfo.data.expires_in) <= 0) {
+      return res.status(401).json({ success: false, message: 'Invalid Google token' });
+    }
+    const profile = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` }, timeout: 5000,
+    });
+    const { name: fullName, sub: googleId, picture, email_verified } = profile.data;
+    const email = normEmail(profile.data.email);
+    if (!email || !googleId || email_verified !== true) {
+      return res.status(401).json({ success: false, message: 'Google email is not verified' });
     }
 
     let user = await User.findOne({ email });
+    // A half-finished email sign-up must not block the real owner of the address from using Google.
+    if (isStaleUnverified(user)) {
+      await removeStale(user);
+      user = null;
+    }
 
     if (!user) {
-      // ── Naya user banao ──
       user = new User({
         email,
-        fullName:     fullName || email.split('@')[0],
-        password:     null,
-        phone:        null,
-        address:      '',
-        isVerified:   true,
-        authProvider: provider,
-        googleId:     googleId || undefined,
+        fullName: fullName || email.split('@')[0],
+        isVerified: true,
+        authProvider: 'google',
+        googleId,
         googleProfile: { displayName: fullName, picture },
-        profileImage:  picture || '',
+        profileImage: picture || '',
       });
       await user.save();
-      console.log('✅ New social user created:', email, 'Provider:', provider);
-
     } else {
-      // ── Existing user update karo ──
-      user.fullName     = fullName || user.fullName;
-      user.authProvider = provider;
-      user.isVerified   = true;
+      if (user.role === 'admin' || user.role === 'technician') {
+        return res.status(403).json({ success: false, message: 'Use your staff login' });
+      }
+      if (user.authProvider !== 'google' && user.password) {
+        return res.status(409).json({ success: false, message: 'This email already uses password login' });
+      }
+      user.fullName = fullName || user.fullName;
+      user.authProvider = 'google';
+      user.isVerified = true;
       user.profileImage = picture || user.profileImage;
       user.googleProfile = { displayName: fullName, picture };
-
-      if (provider === 'google' && googleId) {
-        user.googleId = googleId;
-      }
-
+      user.googleId = googleId;
       await user.save();
-      console.log('✅ Existing user updated with social login:', email);
     }
 
     const token = generateToken(user);
-
-    res.json({
-      success: true,
-      message: `Logged in with ${provider}`,
-      token,
-      user: userResponse(user),
-    });
-
+    res.json({ success: true, message: 'Logged in with google', token, user: userResponse(user) });
   } catch (error) {
-    console.error('❌ Social login error:', error);
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    console.error('❌ Social login error:', error.message);
+    res.status(error.response?.status === 400 || error.response?.status === 401 ? 401 : 500).json({ success: false, message: 'Google login failed' });
   }
 });
 
 // ================================
-// FORGOT PASSWORD
+// FORGOT PASSWORD (same answer whether or not the email exists; staff accounts are excluded)
 // ================================
 router.post('/forgot-password', async (req, res) => {
+  const generic = { success: true, message: 'If an account exists for this email, a reset code has been sent.' };
   try {
-    const { email } = req.body;
+    const email = normEmail(req.body.email);
+    if (!isEmail(email)) return res.status(200).json(generic);
+
     const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    user.otp        = otp;
-    user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
-    await user.save();
-    console.log('✅ Reset OTP generated');
-
-    try {
-      await sendEmail(email, otp);
-      console.log('✅ Reset OTP email sent to:', email);
-    } catch (emailError) {
-      console.log('❌ Reset email send failed:', emailError.message);
+    if (!user || user.role !== 'customer' || !user.isVerified || !canIssueOtp(user)) {
+      return res.status(200).json(generic);
     }
-
-    res.json({ success: true, message: 'Reset code sent to your email' });
-
+    const otp = await issueOtp(user, PURPOSE_RESET);
+    try {
+      await sendEmail(email, otp, PURPOSE_RESET);
+    } catch (emailError) {
+      console.error('❌ Reset email send failed:', emailError.message);
+    }
+    res.json(generic);
   } catch (error) {
+    console.error('❌ Forgot password error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
 // ================================
-// VERIFY RESET OTP
+// VERIFY RESET OTP (does not consume the code)
 // ================================
 router.post('/verify-reset-otp', async (req, res) => {
   try {
-    const { email, otp } = req.body;
-
+    const email = normEmail(req.body.email);
+    if (!isEmail(email)) return invalidCode(res);
     const user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-
-    if (!user.otp || user.otp !== otp) {
-      return res.status(400).json({ success: false, message: 'Invalid OTP' });
-    }
-
-    if (user.otpExpires < new Date()) {
-      return res.status(400).json({ success: false, message: 'OTP expired. Please request a new one.' });
-    }
-
+    if (!user || user.role !== 'customer' || !(await checkOtp(user, req.body.otp, PURPOSE_RESET))) return invalidCode(res);
     res.json({ success: true, message: 'OTP verified successfully' });
-
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
 // ================================
-// RESET PASSWORD
+// RESET PASSWORD — needs the email AND the code (the code alone identifies nobody)
 // ================================
 router.post('/reset-password/:token', async (req, res) => {
   try {
-    const { token }    = req.params;
+    const email = normEmail(req.body.email);
     const { password } = req.body;
+    if (!isEmail(email)) return res.status(400).json({ success: false, message: 'Email is required' });
+    if (!isValidPassword(password)) {
+      return res.status(400).json({ success: false, message: `Password must be ${PASSWORD_MIN} to ${PASSWORD_MAX} characters` });
+    }
 
-    const user = await User.findOne({
-      otp:        token,
-      otpExpires: { $gt: new Date() }
-    });
+    const user = await User.findOne({ email });
+    if (!user || user.role !== 'customer' || !(await checkOtp(user, req.params.token, PURPOSE_RESET))) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired reset code' });
+    }
 
-    if (!user) return res.status(400).json({ success: false, message: 'Invalid or expired reset code' });
-
-    user.password   = password;
-    user.otp        = undefined;
-    user.otpExpires = undefined;
+    user.password = password;
+    clearOtp(user);
     await user.save();
-    console.log('✅ Password reset for:', user.email || user.phone);
 
     res.json({ success: true, message: 'Password reset successful' });
-
   } catch (error) {
+    console.error('❌ Reset password error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -579,12 +488,14 @@ router.get('/verify', async (req, res) => {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ success: false, message: 'No token provided' });
 
-    const decoded = jwt.verify(token, JWT_SECRET);
-    const user    = await User.findById(decoded.id).select('-password');
-    if (!user) return res.status(401).json({ success: false, message: 'User not found' });
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+    const user = await User.findById(decoded.id).select('-password');
+    if (!user || !user.isVerified) return res.status(401).json({ success: false, message: 'User not found' });
+    if (user.passwordChangedAt && decoded.iat < Math.floor(user.passwordChangedAt.getTime() / 1000)) {
+      return res.status(401).json({ success: false, message: 'Invalid token' });
+    }
 
     res.json({ success: true, user });
-
   } catch (error) {
     res.status(401).json({ success: false, message: 'Invalid token' });
   }

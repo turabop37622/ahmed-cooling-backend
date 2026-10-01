@@ -2,21 +2,23 @@
 
 const express    = require('express');
 const router     = express.Router();
-const jwt        = require('jsonwebtoken');
+const auth       = require('../middleware/auth');
 const Product    = require('../models/Products');
 const cloudinary = require('../utils/cloudinary');
 const upload     = require('../utils/multer');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token';
 const adminAuth = (req, res, next) => {
-  try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) return res.status(401).json({ success: false, message: 'No token' });
-    const decoded = jwt.verify(token, JWT_SECRET);
-    if (decoded.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only' });
-    req.user = decoded;
-    next();
-  } catch { res.status(401).json({ success: false, message: 'Invalid token' }); }
+  if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only' });
+  next();
+};
+
+// Bad ids/values are the caller's mistake (400); anything else is logged and hidden behind a generic 500.
+const fail = (res, err, where) => {
+  if (err?.name === 'CastError' || err?.name === 'ValidationError') {
+    return res.status(400).json({ success: false, message: 'Invalid request data' });
+  }
+  console.error(`❌ Products ${where} error:`, err);
+  return res.status(500).json({ success: false, message: 'Server error' });
 };
 
 // ── GET /api/products/categories ────────────────────────────
@@ -30,28 +32,29 @@ router.get('/categories', async (req, res) => {
     ];
     res.json({ success: true, data: CATEGORIES });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    fail(res, err, 'categories');
   }
 });
 
 // ── GET /api/products/brands?category=ac ────────────────────
 router.get('/brands', async (req, res) => {
   try {
-    const { category } = req.query;
+    const category = typeof req.query.category === 'string' ? req.query.category : '';
     if (!category) {
       return res.status(400).json({ success: false, message: 'category required' });
     }
     const brands = await Product.distinct('brand', { categoryId: category });
     res.json({ success: true, data: brands.sort() });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    fail(res, err, 'brands');
   }
 });
 
 // ── GET /api/products/models?category=ac&brand=Daikin ────────
 router.get('/models', async (req, res) => {
   try {
-    const { category, brand } = req.query;
+    const category = typeof req.query.category === 'string' ? req.query.category : '';
+    const brand = typeof req.query.brand === 'string' ? req.query.brand : '';
     if (!category || !brand) {
       return res.status(400).json({ success: false, message: 'category aur brand dono required hain' });
     }
@@ -61,26 +64,43 @@ router.get('/models', async (req, res) => {
     );
     res.json({ success: true, data: models });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    fail(res, err, 'models');
   }
 });
 
 // ── GET /api/products/all ────────────────────────────────────
 router.get('/all', async (req, res) => {
   try {
-    const { category } = req.query;
+    const category = typeof req.query.category === 'string' ? req.query.category : '';
     const filter = category ? { categoryId: category } : {};
-    const products = await Product.find(filter);
-    res.json({ success: true, data: products });
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const [products, total] = await Promise.all([
+      Product.find(filter).sort({ _id: 1 }).skip((page - 1) * limit).limit(limit),
+      Product.countDocuments(filter),
+    ]);
+    res.json({ success: true, data: products, total, pagination: { total, page, limit, pages: Math.ceil(total / limit) } });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    fail(res, err, 'list');
   }
 });
 
 // ── POST /api/products/add ───────────────────────────────────
-router.post('/add', adminAuth, upload.single('image'), async (req, res) => {
+router.post('/add', auth, adminAuth, upload.single('image'), async (req, res) => {
   try {
     const { categoryId, brand, model, type, variants } = req.body;
+    if ([categoryId, brand, model].some((v) => typeof v !== 'string' || !v.trim())) {
+      return res.status(400).json({ success: false, message: 'categoryId, brand and model are required' });
+    }
+    let parsedVariants = [];
+    if (variants) {
+      try {
+        parsedVariants = typeof variants === 'string' ? JSON.parse(variants) : variants;
+      } catch {
+        return res.status(400).json({ success: false, message: 'variants must be valid JSON' });
+      }
+      if (!Array.isArray(parsedVariants)) return res.status(400).json({ success: false, message: 'variants must be a list' });
+    }
 
     let imageUrl      = '';
     let imagePublicId = '';
@@ -105,7 +125,7 @@ router.post('/add', adminAuth, upload.single('image'), async (req, res) => {
       brand,
       model,
       type,
-      variants: variants ? JSON.parse(variants) : [],
+      variants: parsedVariants,
       imageUrl,
       imagePublicId,
     });
@@ -113,22 +133,21 @@ router.post('/add', adminAuth, upload.single('image'), async (req, res) => {
     res.status(201).json({ success: true, data: product });
 
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    fail(res, err, 'add');
   }
 });
 
 // ── PUT /api/products/:id/image ──────────────────────────────
-router.put('/:id/image', adminAuth, upload.single('image'), async (req, res) => {
+router.put('/:id/image', auth, adminAuth, upload.single('image'), async (req, res) => {
   try {
+    if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(404).json({ success: false, message: 'Product nahi mila' });
+    if (!req.file) return res.status(400).json({ success: false, message: 'Image file is required' });
     const product = await Product.findById(req.params.id);
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product nahi mila' });
     }
 
-    if (product.imagePublicId) {
-      await cloudinary.uploader.destroy(product.imagePublicId);
-    }
-
+    // Upload the new image FIRST; the old one is only removed once the new one is safely stored.
     const result = await new Promise((resolve, reject) => {
       cloudinary.uploader.upload_stream(
         { folder: 'ahmedcooling/products' },
@@ -139,20 +158,26 @@ router.put('/:id/image', adminAuth, upload.single('image'), async (req, res) => 
       ).end(req.file.buffer);
     });
 
+    const oldPublicId = product.imagePublicId;
     product.imageUrl      = result.secure_url;
     product.imagePublicId = result.public_id;
     await product.save();
 
+    if (oldPublicId) {
+      try { await cloudinary.uploader.destroy(oldPublicId); } catch (e) { console.warn('Old image cleanup failed:', e.message); }
+    }
+
     res.json({ success: true, data: product });
 
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    fail(res, err, 'image upload');
   }
 });
 
 // ── DELETE /api/products/:id ─────────────────────────────────
-router.delete('/:id', adminAuth, async (req, res) => {
+router.delete('/:id', auth, adminAuth, async (req, res) => {
   try {
+    if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(404).json({ success: false, message: 'Product nahi mila' });
     const product = await Product.findById(req.params.id);
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product nahi mila' });
@@ -166,7 +191,7 @@ router.delete('/:id', adminAuth, async (req, res) => {
     res.json({ success: true, message: 'Product delete ho gaya' });
 
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    fail(res, err, 'delete');
   }
 });
 

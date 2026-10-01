@@ -7,8 +7,9 @@ const sendSMS = async (phone, otp) => {
   console.log('📲 Sending SMS OTP to:', fullPhone);
 
   if (!process.env.BREVO_API_KEY) {
-    console.log('⚠️ BREVO_API_KEY not set, OTP logged to console');
-    console.log(`📲 OTP for ${fullPhone}: ${otp}`);
+    // Never print codes in production logs, and never pretend an SMS was sent.
+    if (process.env.NODE_ENV === 'production') throw new Error('SMS provider is not configured');
+    console.log(`📲 [dev only] OTP for ${fullPhone}: ${otp}`);
     return { fallback: true };
   }
 

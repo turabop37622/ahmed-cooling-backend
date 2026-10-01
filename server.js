@@ -7,7 +7,14 @@ const axios = require('axios');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
+const { rejectMongoOperators } = require('./utils/security');
+const { mountAuthLimiters, geocodeLimiter } = require('./utils/limiters');
+
 const app = express();
+
+// Render/Vercel sit behind a proxy: without this every visitor shares the proxy's IP and the rate limiters
+// either lock out everybody or protect nobody.
+app.set('trust proxy', Number(process.env.TRUST_PROXY || 1));
 
 // ============================================
 // SECURITY MIDDLEWARE
@@ -38,39 +45,31 @@ app.use(cors({
   credentials: true,
 }));
 
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: { success: false, message: 'Too many attempts. Please try again after 15 minutes.' },
-  standardHeaders: true,
-  legacyHeaders: false,
+// Body parsing and operator-injection blocking run BEFORE the limiters, because the limiters key
+// some routes by the email/phone in the body.
+app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ limit: '100kb', extended: true }));
+app.use(rejectMongoOperators);
+
+mountAuthLimiters(app);
+
+// The server starts listening BEFORE MongoDB is connected (so a slow Atlas/cold start never leaves Render with no
+// listener). Until the database is connected and the routes are mounted, the API answers 503 instead of hanging.
+let routesReady = false;
+const dbConnected = () => mongoose.connection.readyState === 1;
+
+app.get('/api/health', (req, res) => {
+  const connected = dbConnected();
+  res.status(connected ? 200 : 503).json(connected
+    ? { success: true, status: 'ok' }
+    : { success: false, status: 'database_unavailable', message: 'Database is not ready' });
 });
 
-const otpLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000,
-  max: 5,
-  message: { success: false, message: 'Too many OTP attempts. Please try again after 5 minutes.' },
-  standardHeaders: true,
-  legacyHeaders: false,
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/geocode')) return next(); // the geocode proxy does not need the database
+  if (routesReady && dbConnected()) return next();
+  return res.status(503).json({ success: false, message: 'Service starting, please retry' });
 });
-
-const generalLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
-app.use('/api/auth/phone/login', authLimiter);
-app.use('/api/auth/phone/register', authLimiter);
-app.use('/api/auth/verify-otp', otpLimiter);
-app.use('/api/auth/forgot-password', authLimiter);
-app.use('/api', generalLimiter);
-
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ limit: '5mb', extended: true }));
 
 // ============================================
 // GOOGLE SEARCH CONSOLE VERIFICATION
@@ -730,9 +729,9 @@ app.get('/', (req, res) => {
       <div class="footer-col">
         <h5>Contact Us</h5>
         <ul>
-          <li>Email: <a href="mailto:turabop37622@gmail.com">turabop37622@gmail.com</a></li>
+          <li>Email: <a href="mailto:ahmedcoolingworkshop@gmail.com">ahmedcoolingworkshop@gmail.com</a></li>
           <li>Support: <a href="mailto:ahmedcoolingworkshop@gmail.com">ahmedcoolingworkshop@gmail.com</a></li>
-          <li>Operating Area: Lahore, Pakistan</li>
+          <li>Operating Area: Jeddah, Saudi Arabia</li>
           <li>Website: <a href="https://ahmed-cooling-backend.onrender.com">ahmed-cooling-backend.onrender.com</a></li>
         </ul>
       </div>
@@ -748,6 +747,7 @@ app.get('/', (req, res) => {
 
 // ✅ RENDER HEALTH CHECK (VERY IMPORTANT)
 app.get('/health', (req, res) => {
+  if (!dbConnected()) return res.status(503).json({ status: 'database_unavailable', message: 'Database is not ready' });
   res.status(200).json({ status: 'OK' });
 });
 
@@ -1060,7 +1060,7 @@ app.get('/privacy-policy', (req, res) => {
         You can request permanent deletion of your account, Google profile information, and service history by contacting our support team:
       </p>
       <ul>
-        <li><strong>Email:</strong> <a href="mailto:turabop37622@gmail.com">turabop37622@gmail.com</a> (or <a href="mailto:ahmedcoolingworkshop@gmail.com">ahmedcoolingworkshop@gmail.com</a>)</li>
+        <li><strong>Email:</strong> <a href="mailto:ahmedcoolingworkshop@gmail.com">ahmedcoolingworkshop@gmail.com</a></li>
         <li><strong>Subject Line:</strong> <em>Account and Data Deletion Request - Ahmed Cooling Workshop</em></li>
         <li><strong>Details:</strong> Include your registered Google email address.</li>
         <li><strong>Processing Time:</strong> Upon identity verification, all personal data associated with your account will be permanently expunged from our active production databases within <strong>14 to 30 days</strong>.</li>
@@ -1098,9 +1098,8 @@ app.get('/privacy-policy', (req, res) => {
       <div class="contact-card">
         <p><strong>Application:</strong> Ahmed Cooling Workshop</p>
         <p><strong>Developer / Operator:</strong> Ahmed Cooling Workshop</p>
-        <p><strong>Primary Support Email:</strong> <a href="mailto:turabop37622@gmail.com">turabop37622@gmail.com</a></p>
-        <p><strong>Secondary Support Email:</strong> <a href="mailto:ahmedcoolingworkshop@gmail.com">ahmedcoolingworkshop@gmail.com</a></p>
-        <p><strong>Service Area:</strong> Lahore, Pakistan</p>
+        <p><strong>Primary Support Email:</strong> <a href="mailto:ahmedcoolingworkshop@gmail.com">ahmedcoolingworkshop@gmail.com</a></p>
+        <p><strong>Service Area:</strong> Jeddah, Saudi Arabia</p>
         <p><strong>Website:</strong> <a href="https://ahmed-cooling-backend.onrender.com">https://ahmed-cooling-backend.onrender.com</a></p>
       </div>
 
@@ -1291,7 +1290,7 @@ app.get('/terms-of-service', (req, res) => {
       <p>Ahmed Cooling Workshop and its certified technicians strive for maximum safety and professionalism. In no event shall Ahmed Cooling Workshop be liable for indirect, incidental, or consequential damages resulting from pre-existing equipment defects or unauthorized third-party tampering.</p>
 
       <h2>8. Contact Information</h2>
-      <p>For inquiries regarding these Terms of Service, please contact us at <a href="mailto:turabop37622@gmail.com">turabop37622@gmail.com</a> or visit our <a href="/">homepage</a>.</p>
+      <p>For inquiries regarding these Terms of Service, please contact us at <a href="mailto:ahmedcoolingworkshop@gmail.com">ahmedcoolingworkshop@gmail.com</a> or visit our <a href="/">homepage</a>.</p>
     </div>
   </div>
 
@@ -1332,34 +1331,48 @@ if (!JWT_SECRET) {
   process.exit(1);
 }
 
-const auth = (req, res, next) => {
-  try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    
-    if (!token) {
-      return res.status(401).json({ success: false, error: 'No token provided' });
-    }
-
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (error) {
-    res.status(401).json({ success: false, error: 'Invalid token' });
-  }
-};
-
 // ============================================
 // START SERVER WITH DB CONNECTION
 // ============================================
 
 const PORT = process.env.PORT || 5000;
 
+let server;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Connect with retry: a failed attempt is logged and retried with a growing delay instead of killing the process.
+async function connectWithRetry(maxAttempts = 10) {
+  console.log('🔄 Connecting to MongoDB...');
+  console.log('📍 URI:', MONGODB_URI.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@'));
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 });
+      return;
+    } catch (err) {
+      console.error(`❌ MongoDB connection attempt ${attempt}/${maxAttempts} failed:`, err.message);
+      if (attempt === maxAttempts) throw err;
+      await sleep(Math.min(30000, 2000 * attempt));
+    }
+  }
+}
+
+function listen() {
+  server = app.listen(PORT, '0.0.0.0', () => {
+    console.log('════════════════════════════════════════════');
+    console.log(`🚀 Server listening on http://localhost:${PORT} (database connecting...)`);
+    console.log('════════════════════════════════════════════');
+  });
+  return server;
+}
+
 async function startServer() {
   try {
-    console.log('🔄 Connecting to MongoDB...');
-    console.log('📍 URI:', MONGODB_URI.replace(/\/\/([^:]+):([^@]+)@/, '//$1:****@'));
-
-    await mongoose.connect(MONGODB_URI);
+    if (JWT_SECRET.length < 32) {
+      console.warn('⚠️ JWT_SECRET is shorter than 32 characters — replace it with a long random value.');
+    }
+    listen();
+    await connectWithRetry();
 
     console.log('\n✅ MongoDB Connected Successfully!');
     console.log(`📍 Database: ${mongoose.connection.name}`);
@@ -1379,22 +1392,16 @@ async function startServer() {
     // Ensure Admin user exists — credentials from environment variables only
     const ADMIN_SEED_EMAIL = process.env.ADMIN_SEED_EMAIL;
     const ADMIN_SEED_PASSWORD = process.env.ADMIN_SEED_PASSWORD;
-    if (ADMIN_SEED_EMAIL && ADMIN_SEED_PASSWORD) {
+    if (ADMIN_SEED_EMAIL && ADMIN_SEED_PASSWORD && ADMIN_SEED_PASSWORD.length < 12) {
+      console.warn('⚠️ ADMIN_SEED_PASSWORD is shorter than 12 characters — refusing to seed the admin account. Use a longer password.');
+    } else if (ADMIN_SEED_EMAIL && ADMIN_SEED_PASSWORD) {
       try {
         let adminDoc = await User.findOne({ email: ADMIN_SEED_EMAIL });
         if (!adminDoc) {
           adminDoc = await User.findOne({ role: 'admin' });
         }
         if (adminDoc) {
-          adminDoc.email = ADMIN_SEED_EMAIL;
-          adminDoc.role = 'admin';
-          adminDoc.isVerified = true;
-          const isMatch = await adminDoc.comparePassword(ADMIN_SEED_PASSWORD);
-          if (!isMatch) {
-            adminDoc.password = ADMIN_SEED_PASSWORD;
-            await adminDoc.save();
-            console.log('🔒 Admin user updated in MongoDB with encrypted bcrypt password');
-          }
+          console.log('Admin account already exists; startup seed left it unchanged');
         } else {
           adminDoc = new User({
             fullName: 'Ahmed Admin',
@@ -1447,30 +1454,49 @@ async function startServer() {
     // ============================================
     const adminRoutes = require('./routes/admin');
     app.use('/api/admin', adminRoutes);
+    app.use('/api/users', require('./routes/users'));
+    app.use('/api', require('./routes/feedback'));
     console.log('✅ Admin routes loaded');
 
     // ============================================
     // GEOCODE PROXY (keeps Google API key server-side)
     // ============================================
-    app.get('/api/geocode/reverse', async (req, res) => {
+    const geocodeCache = new Map(); // "lat,lng,lang" (3 decimals) -> { address, expires }
+    const GEOCODE_CACHE_MAX = 500;
+    const GEOCODE_CACHE_TTL = 10 * 60 * 1000;
+    app.get('/api/geocode/reverse', geocodeLimiter, async (req, res) => {
       try {
-        const { lat, lng, lang } = req.query;
-        if (!lat || !lng) return res.status(400).json({ success: false, message: 'lat and lng required' });
+        const latNum = Number(req.query.lat);
+        const lngNum = Number(req.query.lng);
+        if (!Number.isFinite(latNum) || !Number.isFinite(lngNum) || Math.abs(latNum) > 90 || Math.abs(lngNum) > 180) {
+          return res.status(400).json({ success: false, message: 'Valid lat and lng required' });
+        }
+        const lat = latNum;
+        const lng = lngNum;
+        const lang = ['en', 'ar', 'ur'].includes(req.query.lang) ? req.query.lang : 'en';
+
+        const cacheKey = `${lat.toFixed(3)},${lng.toFixed(3)},${lang}`;
+        const cached = geocodeCache.get(cacheKey);
+        if (cached && cached.expires > Date.now()) return res.json({ success: true, address: cached.address });
+        const remember = (address) => {
+          if (geocodeCache.size >= GEOCODE_CACHE_MAX) geocodeCache.delete(geocodeCache.keys().next().value);
+          geocodeCache.set(cacheKey, { address, expires: Date.now() + GEOCODE_CACHE_TTL });
+          return address;
+        };
 
         const GOOGLE_GEOCODE_KEY = process.env.GOOGLE_GEOCODE_KEY;
-        if (!GOOGLE_GEOCODE_KEY) {
-          console.warn('⚠️ GOOGLE_GEOCODE_KEY not set — skipping Google geocode, using OSM fallback');
-        }
 
-        // 1. Attempt Google Maps Reverse Geocode
-        try {
-          const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&language=${lang || 'en'}&key=${GOOGLE_GEOCODE_KEY}`;
-          const gRes = await axios.get(url, { timeout: 6000 });
-          if (gRes.data?.status === 'OK' && gRes.data.results?.length) {
-            return res.json({ success: true, address: gRes.data.results[0].formatted_address });
+        // 1. Attempt Google Maps Reverse Geocode (only when a key is configured)
+        if (GOOGLE_GEOCODE_KEY) {
+          try {
+            const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&language=${lang || 'en'}&key=${encodeURIComponent(GOOGLE_GEOCODE_KEY)}`;
+            const gRes = await axios.get(url, { timeout: 6000 });
+            if (gRes.data?.status === 'OK' && gRes.data.results?.length) {
+              return res.json({ success: true, address: remember(gRes.data.results[0].formatted_address) });
+            }
+          } catch (gErr) {
+            // Fall through to OpenStreetMap
           }
-        } catch (gErr) {
-          // Fall through to OpenStreetMap
         }
 
         // 2. Fallback to OpenStreetMap Nominatim
@@ -1487,7 +1513,7 @@ async function startServer() {
             const city = a.city || a.town || (lang === 'ar' ? 'جدة' : 'Jeddah');
             const parts = [road, district, city].filter(Boolean);
             const address = parts.length >= 2 ? parts.join(lang === 'ar' ? '، ' : ', ') : (osmRes.data.display_name || `${city}, KSA`);
-            return res.json({ success: true, address });
+            return res.json({ success: true, address: remember(address) });
           }
         } catch (osmErr) {
           // Fall through
@@ -1500,46 +1526,73 @@ async function startServer() {
     });
 
     console.log('✅ All routes loaded successfully\n');
+    routesReady = true;
 
     // ============================================
     // ERROR HANDLING (MUST BE LAST)
     // ============================================
 
     app.use((err, req, res, next) => {
+      if (err?.type === 'entity.too.large') return res.status(413).json({ success: false, message: 'Request too large' });
+      if (err?.type === 'entity.parse.failed') return res.status(400).json({ success: false, message: 'Invalid JSON' });
+      if (err?.message === 'Not allowed by CORS') return res.status(403).json({ success: false, message: 'Origin not allowed' });
+      if (err?.code === 11000) return res.status(409).json({ success: false, message: 'That value is already in use' });
+      if (err?.name === 'CastError' || err?.name === 'ValidationError') return res.status(400).json({ success: false, message: 'Invalid request data' });
       console.error('🔴 Server Error:', err);
       res.status(500).json({ success: false, message: 'Internal server error' });
     });
 
     app.use((req, res) => {
-      res.status(404).json({
-        success: false,
-        message: 'Route not found',
-        path: req.path
-      });
+      res.status(404).json({ success: false, message: 'Route not found' });
     });
 
     // ============================================
     // START SERVER
     // ============================================
 
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log('════════════════════════════════════════════');
-      console.log(`🚀 Server running on http://localhost:${PORT}`);
-      console.log('════════════════════════════════════════════');
-      console.log('📦 Available API endpoints:');
-      console.log(`   GET  /api/services`);
-      console.log(`   GET  /api/bookings/public`);
-      console.log(`   GET  /api/products/categories`);
-      console.log(`   GET  /api/products/brands?category=ac`);
-      console.log(`   GET  /api/products/models?category=ac&brand=Daikin`);
-      console.log('════════════════════════════════════════════');
-    });
+    console.log('════════════════════════════════════════════');
+    console.log('✅ Ready — database connected, all routes mounted');
+    console.log('📦 Available API endpoints:');
+    console.log(`   GET  /api/services`);
+    console.log(`   GET  /api/bookings/public`);
+    console.log(`   GET  /api/products/categories`);
+    console.log(`   GET  /api/products/brands?category=ac`);
+    console.log(`   GET  /api/products/models?category=ac&brand=Daikin`);
+    console.log('════════════════════════════════════════════');
 
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);
     process.exit(1);
   }
 }
+
+// ============================================
+// PROCESS-LEVEL SAFETY NETS
+// ============================================
+process.on('unhandledRejection', (reason) => {
+  console.error('🔴 Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('🔴 Uncaught exception:', err);
+});
+
+mongoose.connection.on('error', (err) => console.error('🔴 MongoDB connection error:', err.message));
+mongoose.connection.on('disconnected', () => console.warn('⚠️ MongoDB disconnected'));
+
+let shuttingDown = false;
+const shutdown = (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`🛑 ${signal} received — shutting down`);
+  const finish = async () => {
+    try { await mongoose.connection.close(); } catch (e) { console.error('Error closing MongoDB:', e.message); }
+    process.exit(0);
+  };
+  if (server) server.close(finish); else finish();
+  setTimeout(() => process.exit(0), 10000).unref(); // do not hang on keep-alive connections
+};
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 startServer();
 

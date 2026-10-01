@@ -3,38 +3,19 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 
 async function createAdmin() {
+  const { MONGODB_URI, ADMIN_SEED_EMAIL, ADMIN_SEED_PASSWORD } = process.env;
+  if (!MONGODB_URI || !ADMIN_SEED_EMAIL || !ADMIN_SEED_PASSWORD || ADMIN_SEED_PASSWORD.length < 12) {
+    throw new Error('Set MONGODB_URI, ADMIN_SEED_EMAIL and a strong ADMIN_SEED_PASSWORD first');
+  }
   try {
-    await mongoose.connect(process.env.MONGODB_URI);
-    console.log('Connected to MongoDB');
-
-    let admin = await User.findOne({ role: 'admin' });
-    if (admin) {
-      admin.email = 'ahmad9038@legend.com';
-      admin.password = 'Ahmad389104@';
-      admin.fullName = 'Ahmed Admin';
-      admin.isVerified = true;
-      await admin.save();
-      console.log('Existing Admin credentials updated!');
-    } else {
-      admin = new User({
-        fullName: 'Ahmed Admin',
-        email: 'ahmad9038@legend.com',
-        password: 'Ahmad389104@',
-        role: 'admin',
-        isVerified: true,
-        authProvider: 'local',
-      });
-      await admin.save();
-      console.log('Admin created!');
-    }
-    console.log('Email: ahmad9038@legend.com');
-    console.log('Password: Ahmad389104@');
-
+    await mongoose.connect(MONGODB_URI);
+    const existing = await User.findOne({ $or: [{ email: ADMIN_SEED_EMAIL }, { role: 'admin' }] });
+    if (existing) throw new Error('Admin already exists; use the admin security page to change its password');
+    await User.create({ fullName: 'Ahmed Admin', email: ADMIN_SEED_EMAIL, password: ADMIN_SEED_PASSWORD, role: 'admin', isVerified: true, authProvider: 'local' });
+    console.log('Admin account created');
+  } finally {
     await mongoose.disconnect();
-  } catch (err) {
-    console.error('Error:', err.message);
-    process.exit(1);
   }
 }
 
-createAdmin();
+createAdmin().catch((error) => { console.error(error.message); process.exitCode = 1; });

@@ -1,31 +1,28 @@
 const express = require('express');
 const router = express.Router();
-const jwt = require('jsonwebtoken');
+const auth = require('../middleware/auth');
 const Service = require('../models/Service');
 const { body, validationResult } = require('express-validator');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token';
-
-const auth = (req, res, next) => {
-  try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) return res.status(401).json({ success: false, error: 'No token provided' });
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (error) {
-    res.status(401).json({ success: false, error: 'Invalid token' });
-  }
+const ALLOWED_FIELDS = ['name', 'nameAr', 'description', 'descriptionAr', 'icon', 'basePrice', 'category',
+  'isPopular', 'isEmergency', 'estimatedDuration', 'warrantyDays', 'images', 'active'];
+// Only these fields can be written by an admin request; nothing else (_id, createdAt, ...) can be injected.
+const pickFields = (body) => {
+  const out = {};
+  for (const key of ALLOWED_FIELDS) if (body[key] !== undefined) out[key] = body[key];
+  return out;
 };
+const isObjectId = (v) => typeof v === 'string' && /^[a-f\d]{24}$/i.test(v);
 
 // Get all services
 router.get('/', async (req, res) => {
   try {
-    const { category, popular, emergency, active = true } = req.query;
-    
-    const query = { active };
-    
-    if (category) {
+    const { category, popular, emergency } = req.query;
+
+    // The public list only ever shows active services.
+    const query = { active: true };
+
+    if (typeof category === 'string' && category) {
       query.category = category;
     }
     
@@ -56,9 +53,10 @@ router.get('/', async (req, res) => {
 // Get single service
 router.get('/:id', async (req, res) => {
   try {
+    if (!isObjectId(req.params.id)) return res.status(404).json({ success: false, message: 'Service not found' });
     const service = await Service.findById(req.params.id);
-    
-    if (!service) {
+
+    if (!service || !service.active) {
       return res.status(404).json({
         success: false,
         message: 'Service not found'
@@ -106,7 +104,7 @@ router.post('/', auth, [
       });
     }
 
-    const service = new Service(req.body);
+    const service = new Service(pickFields(req.body));
     await service.save();
 
     res.status(201).json({
@@ -135,9 +133,10 @@ router.put('/:id', auth, async (req, res) => {
       });
     }
 
+    if (!isObjectId(req.params.id)) return res.status(404).json({ success: false, message: 'Service not found' });
     const service = await Service.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      { $set: pickFields(req.body) },
       { new: true, runValidators: true }
     );
 
@@ -174,6 +173,7 @@ router.delete('/:id', auth, async (req, res) => {
       });
     }
 
+    if (!isObjectId(req.params.id)) return res.status(404).json({ success: false, message: 'Service not found' });
     const service = await Service.findByIdAndUpdate(
       req.params.id,
       { active: false },
@@ -205,7 +205,7 @@ router.delete('/:id', auth, async (req, res) => {
 // Search services
 router.get('/search/:query', async (req, res) => {
   try {
-    const raw = req.params.query;
+    const raw = String(req.params.query).slice(0, 100);
     const query = raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     
     const services = await Service.find({

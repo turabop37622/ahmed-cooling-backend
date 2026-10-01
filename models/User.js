@@ -15,7 +15,7 @@ const userSchema = new mongoose.Schema({
     sparse: true,        // ✅ phone-only users ke liye null allow
     lowercase: true,
     trim: true,
-    match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
+    match: [/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, 'Please enter a valid email']
   },
 
   password: {
@@ -29,8 +29,7 @@ const userSchema = new mongoose.Schema({
     type: String,
     unique: true,
     sparse: true,        // ✅ email-only users ke liye null allow
-    trim: true,
-    default: null
+    trim: true
   },
   isPhoneVerified: {
     type: Boolean,
@@ -69,6 +68,10 @@ const userSchema = new mongoose.Schema({
   verificationToken: String,
   otp:        { type: String },
   otpExpires: { type: Date },
+  otpPurpose: { type: String, enum: ['verify', 'reset'] },
+  otpAttempts: { type: Number, default: 0 },
+  // Tokens issued before this moment are rejected (set whenever the password changes)
+  passwordChangedAt: { type: Date },
 
   // ── Password reset ──
   resetPasswordToken:   String,
@@ -98,6 +101,7 @@ const userSchema = new mongoose.Schema({
 userSchema.pre('save', async function (next) {
   if (!this.password || !this.isModified('password')) return next();
   try {
+    if (!this.isNew) this.passwordChangedAt = new Date();
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
     next();
@@ -123,6 +127,8 @@ userSchema.methods.toJSON = function () {
   delete obj.resetPasswordExpires;
   delete obj.otp;
   delete obj.otpExpires;
+  delete obj.otpPurpose;
+  delete obj.otpAttempts;
   return obj;
 };
 

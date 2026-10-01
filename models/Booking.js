@@ -156,7 +156,11 @@
       },
       visitCharges: {
         type: Number,
-        default: 200
+        default: 30
+      },
+      // Optional client-supplied key that makes create requests safe to retry (see routes/bookings.js)
+      idempotencyKey: {
+        type: String
       },
       totalAmount: {
         type: Number,
@@ -188,6 +192,7 @@
       customerFeedback: {
         rating: { type: Number, min: 1, max: 5 },
         comment: String,
+        name: String,
         date: Date,
         approved: { type: Boolean, default: false }
       },
@@ -256,6 +261,8 @@
     bookingSchema.index({ createdAt: -1 });
     // ✅ NAYA - User ke bookings nikalne ke liye COMPOUND INDEX
     bookingSchema.index({ user: 1, createdAt: -1 });
+    // Unique per user, but only for bookings that carry a key (a plain sparse index would still index every booking via "user").
+    bookingSchema.index({ user: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } });
 
     // ============================================
     // PRE-SAVE MIDDLEWARE

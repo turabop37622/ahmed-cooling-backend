@@ -34,11 +34,9 @@ async function seedServices() {
     await mongoose.connect(MONGO_URI);
     console.log('Connected!');
 
-    await Service.deleteMany({});
-    console.log('Old services cleared');
-
-    const result = await Service.insertMany(SERVICES);
-    console.log(`${result.length} services inserted!\n`);
+    const existing = new Set((await Service.find({}).select('name')).map((service) => service.name));
+    const result = await Service.insertMany(SERVICES.filter((service) => !existing.has(service.name)));
+    console.log(`${result.length} missing services inserted; existing services preserved\n`);
 
     result.forEach(s => console.log(`   ${s.icon}  ${s.name} — Rs ${s.basePrice}`));
 

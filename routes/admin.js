@@ -1,29 +1,45 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const Booking = require('../models/Booking');
 const Service = require('../models/Service');
+const Inquiry = require('../models/Inquiry');
+const GeneralRating = require('../models/GeneralRating');
+const auth = require('../middleware/auth');
+const { normEmail, burnPasswordCheck } = require('../utils/security');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ahmed-cooling-secret-key-2024-secure-token';
+const isObjectId = (v) => typeof v === 'string' && /^[a-f\d]{24}$/i.test(v);
+// Page/limit from the query string: default 50, hard cap 100.
+const pageParams = (req) => {
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+  return { page, limit, skip: (page - 1) * limit };
+};
+const pageInfo = (total, page, limit) => ({ total, page, limit, pages: Math.ceil(total / limit) });
+const serverError = (res) => res.status(500).json({ success: false, message: 'Server error' });
+
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // Admin Login Endpoint (Public, before adminAuth)
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const cleanEmail = (email || '').toLowerCase().trim();
-    const cleanPass = (password || '').trim();
+    const cleanEmail = normEmail(req.body.email);
+    const cleanPass = typeof req.body.password === 'string' ? req.body.password : '';
+    if (!cleanEmail || !cleanPass) return res.status(400).json({ success: false, message: 'Email and password are required' });
 
     // 1. Check against MongoDB User collection
     try {
       const dbAdmin = await User.findOne({ email: cleanEmail, role: 'admin' });
+      if (!dbAdmin) await burnPasswordCheck(cleanPass);
       if (dbAdmin) {
         const isMatch = await dbAdmin.comparePassword(cleanPass);
         if (isMatch) {
           const token = jwt.sign(
             { id: dbAdmin._id, email: dbAdmin.email, role: 'admin' },
             JWT_SECRET,
-            { expiresIn: '30d' }
+            { algorithm: 'HS256', expiresIn: '8h' }
           );
           return res.json({
             success: true,
@@ -42,47 +58,36 @@ router.post('/login', async (req, res) => {
       console.warn('DB lookup error during admin login:', dbErr?.message);
     }
 
-    // 2. Direct check for updated credentials
-    if (
-      cleanEmail === 'ahmad9038@legend.com' &&
-      cleanPass === 'Ahmad389104@'
-    ) {
-      const token = jwt.sign(
-        { id: 'usr_admin', email: 'ahmad9038@legend.com', role: 'admin' },
-        JWT_SECRET,
-        { expiresIn: '30d' }
-      );
-      return res.json({
-        success: true,
-        token,
-        user: {
-          id: 'usr_admin',
-          fullName: 'Ahmed Admin',
-          email: 'ahmad9038@legend.com',
-          role: 'admin',
-          isVerified: true
-        }
-      });
-    }
-
     return res.status(401).json({ success: false, message: 'Invalid admin email or password' });
   } catch (err) {
-    return res.status(500).json({ success: false, message: err.message || 'Server error' });
+    return serverError(res);
   }
 });
 
-const adminAuth = (req, res, next) => {
-  try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) return res.status(401).json({ success: false, message: 'No token' });
-    const decoded = jwt.verify(token, JWT_SECRET);
-    if (decoded.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only' });
-    req.user = decoded;
-    next();
-  } catch { res.status(401).json({ success: false, message: 'Invalid token' }); }
-};
+// Same token checks as every other route (signature, verified account, password-change revocation),
+// then the role must be admin in the database — not just in the token.
+const adminAuth = (req, res, next) => auth(req, res, () => {
+  if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only' });
+  next();
+});
 
 router.use(adminAuth);
+
+router.post('/change-password', async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (typeof currentPassword !== 'string' || typeof newPassword !== 'string' || newPassword.length < 12 || newPassword.length > 72) {
+      return res.status(400).json({ success: false, message: 'Use a new password of 12 to 72 characters' });
+    }
+    const user = await User.findById(req.user.id);
+    if (!user || !(await user.comparePassword(currentPassword))) return res.status(401).json({ success: false, message: 'Current password is incorrect' });
+    user.password = newPassword;
+    await user.save();
+    res.json({ success: true, message: 'Password changed' });
+  } catch {
+    res.status(500).json({ success: false, message: 'Could not change password' });
+  }
+});
 
 router.get('/stats', async (req, res) => {
   try {
@@ -106,90 +111,110 @@ router.get('/stats', async (req, res) => {
       stats: { totalUsers, totalBookings, pending, confirmed, completed, cancelled, inProgress, totalServices, revenue },
     });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    serverError(res);
   }
 });
 
 router.get('/bookings', async (req, res) => {
   try {
-    const { status, page = 1, limit = 20 } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const query = {};
-    if (status && status !== 'all') query.status = status;
-    const skip = (page - 1) * limit;
+    if (typeof req.query.status === 'string' && req.query.status !== 'all') query.status = req.query.status;
 
     const bookings = await Booking.find(query)
       .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+      .skip((page - 1) * limit)
+      .limit(limit);
     const total = await Booking.countDocuments(query);
 
-    res.json({ success: true, bookings, pagination: { total, page: parseInt(page), pages: Math.ceil(total / limit) } });
+    res.json({ success: true, bookings, pagination: { total, page, pages: Math.ceil(total / limit) } });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    serverError(res);
   }
 });
 
 // Delete Booking Endpoint
 router.delete('/bookings/:id', async (req, res) => {
   try {
-    const booking = await Booking.findByIdAndDelete(req.params.id);
-    if (!booking) {
-      // also try by bookingId or orderNumber
-      await Booking.findOneAndDelete({ $or: [{ bookingId: req.params.id }, { orderNumber: req.params.id }] });
-    }
+    const key = String(req.params.id);
+    const filter = isObjectId(key) ? { _id: key } : { $or: [{ bookingId: key }, { orderNumber: key }] };
+    const booking = await Booking.findOneAndDelete(filter);
+    if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
+    // Audit trail: who deleted what (kept in the server log so a deletion can always be traced).
+    console.warn(`🗑️ AUDIT booking deleted by admin ${req.user.id}: ${booking.bookingId || booking._id} (${booking.status}, ${booking.totalAmount || 0} ${booking.currency || ''})`);
     res.json({ success: true, message: 'Booking deleted successfully' });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-// Clean up fake / test spam bookings from DB
-router.post('/bookings/cleanup-fake', async (req, res) => {
-  try {
-    const result = await Booking.deleteMany({
-      $or: [
-        { customerName: { $regex: /fuck|asdasd|gfhf|dassa|ffsdfsd|asdad|afgfdcf|karanel|papa|mafia/i } },
-        { address: { $regex: /depalpur|sorong|mountain view|dgdgd|sdasda|chuihiu/i } },
-        { phone: '+923456494643' }
-      ]
-    });
-    res.json({ success: true, message: 'Fake bookings deleted', deletedCount: result.deletedCount });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    serverError(res);
   }
 });
 
 router.get('/users', async (req, res) => {
   try {
-    const users = await User.find({})
-      .select('fullName email phone role isVerified isPhoneVerified createdAt authProvider')
-      .sort({ createdAt: -1 });
-    res.json({ success: true, users, total: users.length });
+    const { page, limit, skip } = pageParams(req);
+    const [users, total] = await Promise.all([
+      User.find({})
+        .select('fullName email phone role isVerified isPhoneVerified createdAt authProvider')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit),
+      User.countDocuments({}),
+    ]);
+    res.json({ success: true, users, total, pagination: pageInfo(total, page, limit) });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    serverError(res);
+  }
+});
+
+router.get('/inquiries', async (req, res) => {
+  try {
+    const inquiries = await Inquiry.find().sort({ createdAt: -1 }).limit(200);
+    res.json({ success: true, inquiries });
+  } catch {
+    res.status(500).json({ success: false, message: 'Could not load inquiries' });
+  }
+});
+
+router.get('/ratings', async (req, res) => {
+  try {
+    const ratings = await GeneralRating.find().sort({ createdAt: -1 }).limit(200);
+    res.json({ success: true, ratings });
+  } catch {
+    res.status(500).json({ success: false, message: 'Could not load ratings' });
   }
 });
 
 router.get('/users/:userId/bookings', async (req, res) => {
   try {
+    if (!isObjectId(req.params.userId)) return res.status(404).json({ success: false, message: 'User not found' });
     const userData = await User.findById(req.params.userId).select('phone email');
     const conditions = [{ user: req.params.userId }];
     if (userData?.phone) conditions.push({ phone: userData.phone });
     if (userData?.email) conditions.push({ email: userData.email });
 
-    const bookings = await Booking.find({ $or: conditions }).sort({ createdAt: -1 });
-    res.json({ success: true, bookings });
+    const { page, limit, skip } = pageParams(req);
+    const filter = { $or: conditions };
+    const [bookings, total] = await Promise.all([
+      Booking.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+      Booking.countDocuments(filter),
+    ]);
+    res.json({ success: true, bookings, total, pagination: pageInfo(total, page, limit) });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    serverError(res);
   }
 });
 
 // Reviews Management
 router.get('/reviews', async (req, res) => {
   try {
-    const bookings = await Booking.find({ 'customerFeedback.rating': { $exists: true, $gte: 1 } })
+    const { page, limit, skip } = pageParams(req);
+    const reviewFilter = { 'customerFeedback.rating': { $exists: true, $gte: 1 } };
+    const total = await Booking.countDocuments(reviewFilter);
+    const bookings = await Booking.find(reviewFilter)
       .select('customerName customerFeedback createdAt address bookingId service serviceDetails')
-      .sort({ 'customerFeedback.date': -1 });
+      .sort({ 'customerFeedback.date': -1 })
+      .skip(skip)
+      .limit(limit);
     const reviews = bookings.map((b) => ({
       _id: b._id,
       bookingId: b.bookingId,
@@ -200,15 +225,16 @@ router.get('/reviews', async (req, res) => {
       date: b.customerFeedback?.date || b.createdAt,
       approved: b.customerFeedback?.approved || false,
     }));
-    res.json({ success: true, reviews });
+    res.json({ success: true, reviews, total, pagination: pageInfo(total, page, limit) });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    serverError(res);
   }
 });
 
 router.put('/reviews/:id/approve', async (req, res) => {
   try {
     const { approved } = req.body;
+    if (!isObjectId(req.params.id)) return res.status(404).json({ success: false, message: 'Review not found' });
     const booking = await Booking.findById(req.params.id);
     if (!booking || !booking.customerFeedback?.rating) {
       return res.status(404).json({ success: false, message: 'Review not found' });
@@ -217,33 +243,11 @@ router.put('/reviews/:id/approve', async (req, res) => {
     await booking.save();
     res.json({ success: true, message: approved !== false ? 'Review approved' : 'Review rejected' });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    serverError(res);
   }
 });
 
-// Services Management
-router.put('/services/:id', async (req, res) => {
-  try {
-    const Service = require('../models/Service');
-    const service = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!service) {
-      return res.status(404).json({ success: false, message: 'Service not found' });
-    }
-    res.json({ success: true, message: 'Service updated successfully', service });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
-router.post('/services', async (req, res) => {
-  try {
-    const Service = require('../models/Service');
-    const service = await Service.create(req.body);
-    res.json({ success: true, message: 'Service created successfully', service });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
+// Service management lives in routes/services.js (validated, admin only): /api/services
 
 module.exports = router;
 
