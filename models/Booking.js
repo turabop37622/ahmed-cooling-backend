@@ -196,6 +196,9 @@
         date: Date,
         approved: { type: Boolean, default: false }
       },
+      // Set when the customer moves the appointment (admin sees the old slot too)
+      rescheduledAt: { type: Date },
+      previousSchedule: { date: String, time: String },
       cancellationReason: {
         type: String
       },
