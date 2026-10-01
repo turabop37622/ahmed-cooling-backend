@@ -699,9 +699,9 @@ const rescheduleForOwner = async (req, res, booking) => {
     return res.status(400).json({ success: false, message: `Cannot reschedule in ${booking.status} status` });
   }
   const date = cleanStr(req.body.date || req.body.scheduledDate, 10);
-  const time = cleanStr(req.body.time || req.body.scheduledTime, 20);
-  const problem = validateSchedule(date, time);
-  if (problem) return res.status(400).json({ success: false, message: problem });
+  // Only the day is changed by the customer; the booking keeps its existing time slot.
+  const time = cleanStr(req.body.time || req.body.scheduledTime, 20) || booking.time || 'Anytime';
+  if (!isFutureOrToday(date)) return res.status(400).json({ success: false, message: 'Please choose a valid date (YYYY-MM-DD) that is not in the past' });
 
   const previous = { date: booking.date, time: booking.time };
   booking.previousSchedule = previous;
