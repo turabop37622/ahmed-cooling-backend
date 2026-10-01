@@ -692,39 +692,6 @@ const cancelForOwner = async (req, res, booking) => {
   return res.json({ success: true, message: 'Booking cancelled', data: { bookingId, status: booking.status }, booking });
 };
 
-// ============================================
-// ✅ EMAIL: ADMIN - Booking Rescheduled
-// ============================================
-const sendBookingRescheduledEmail = async (rawData) => {
-  try {
-    const data = escapeFields(rawData);
-    const { bookingId, orderNumber, customerName, customerPhone, serviceName, oldDate, oldTime, date, time } = data;
-    await axios.post('https://api.brevo.com/v3/smtp/email', {
-      sender: { name: "Ahmed Cooling - System", email: SENDER_EMAIL },
-      to: [{ email: ADMIN_EMAIL }],
-      subject: subjectLine(`🔄 Booking RESCHEDULED: ${bookingId} | ${rawData.customerName}`),
-      htmlContent: `
-        <div style="font-family:Arial,sans-serif;max-width:650px;margin:auto;border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.15);">
-          <div style="background:linear-gradient(135deg,#2563EB,#1E3A8A);padding:24px;text-align:center;">
-            <h1 style="color:#fff;margin:0;font-size:22px;">🔄 Booking Rescheduled</h1>
-            <p style="color:rgba(255,255,255,0.85);margin:8px 0 0;font-size:14px;">Customer changed the appointment time</p>
-          </div>
-          <div style="background:#fff;padding:24px;">
-            <table style="width:100%;border-collapse:collapse;">
-              <tr style="background:#F9FAFB;"><td style="padding:10px 14px;font-size:13px;color:#6B7280;width:35%;">Customer</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">${customerName} (<a href="tel:${customerPhone}" style="color:#3B82F6;">${customerPhone}</a>)</td></tr>
-              <tr><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Service</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">${serviceName}</td></tr>
-              <tr style="background:#F9FAFB;"><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Order #</td><td style="padding:10px 14px;font-size:14px;font-weight:600;">${orderNumber} (${bookingId})</td></tr>
-              <tr><td style="padding:10px 14px;font-size:13px;color:#6B7280;">Old slot</td><td style="padding:10px 14px;font-size:14px;text-decoration:line-through;color:#9CA3AF;">${oldDate} • ${oldTime}</td></tr>
-              <tr style="background:#ECFDF5;"><td style="padding:10px 14px;font-size:13px;color:#065F46;">New slot</td><td style="padding:10px 14px;font-size:15px;font-weight:700;color:#065F46;">${date} • ${time}</td></tr>
-            </table>
-          </div>
-        </div>`,
-    }, { headers: { 'api-key': process.env.BREVO_API_KEY, 'Content-Type': 'application/json' }, timeout: 10000 });
-  } catch (error) {
-    console.error('❌ Reschedule email error:', error.response?.data || error.message);
-  }
-};
-
 // One implementation for both reschedule routes.
 const rescheduleForOwner = async (req, res, booking) => {
   if (!ownsBooking(booking, req.user)) return res.status(403).json({ success: false, message: 'Access denied' });
@@ -745,12 +712,6 @@ const rescheduleForOwner = async (req, res, booking) => {
   booking.scheduledTime = time;
   booking.statusHistory.push({ status: booking.status, timestamp: new Date(), note: 'Rescheduled by customer' });
   await booking.save();
-  sendBookingRescheduledEmail({
-    bookingId: booking.bookingId || booking._id.toString(), orderNumber: booking.orderNumber,
-    customerName: booking.customerName, customerPhone: booking.phone,
-    serviceName: emailServiceFields(booking).serviceName,
-    oldDate: previous.date || '-', oldTime: previous.time || '-', date, time,
-  });
   return res.json({ success: true, message: 'Booking rescheduled', data: { bookingId: booking.bookingId || booking._id, date: booking.date, time: booking.time } });
 };
 
