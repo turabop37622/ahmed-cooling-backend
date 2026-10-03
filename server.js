@@ -1386,6 +1386,11 @@ function listen() {
     console.log(`🚀 Server listening on http://localhost:${PORT} (database connecting...)`);
     console.log('════════════════════════════════════════════');
   });
+  // Render's proxy keeps connections to the app open for reuse. Node's default keep-alive (5s) is shorter, so Node
+  // could close a socket at the moment the proxy sends the next request on it, and the visitor's request would fail
+  // with a dropped connection. Keep sockets open longer than the proxy does.
+  server.keepAliveTimeout = 120 * 1000;
+  server.headersTimeout = 125 * 1000;
   return server;
 }
 
