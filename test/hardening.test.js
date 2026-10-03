@@ -15,7 +15,6 @@ const Technician = require('../models/Technician');
 const Notification = require('../models/Notification');
 const router = require('../routes/bookings');
 const upload = require('../utils/multer');
-const { mountAuthLimiters } = require('../utils/limiters');
 
 const USER_ID = '507f1f77bcf86cd799439011';
 const TECH_ID = '507f1f77bcf86cd799439015';
@@ -154,21 +153,7 @@ test('uploads accept only jpeg, png and webp', () => {
   });
 });
 
-test('admin login is limited per account even when the attacker rotates IPs', async () => {
-  const app = express();
-  app.set('trust proxy', 1);
-  app.use(express.json());
-  mountAuthLimiters(app);
-  app.post('/api/admin/login', (req, res) => res.status(401).json({ success: false }));
-  await withServer(app, async (base) => {
-    const hit = (email, n) => fetch(`${base}/api/admin/login`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': `10.0.0.${n}` }, body: JSON.stringify({ email, password: 'x' }),
-    }).then((r) => r.status);
-    for (let i = 1; i <= 10; i += 1) assert.equal(await hit('admin@example.com', i), 401);
-    assert.equal(await hit('admin@example.com', 50), 429); // new IP, same account
-    assert.equal(await hit('someone@example.com', 51), 401);
-  });
-});
+// Admin login limiting (per IP + email, progressive delay per email) is covered in limiters.test.js.
 
 test('visit charge is NaN-safe and the schema default is 30', () => {
   assert.equal(new Booking({}).visitCharges, 30);

@@ -198,6 +198,19 @@ test('login does not reveal whether an email exists and requires a string passwo
   assert.equal(badType.status, 400);
 });
 
+test('admins cannot sign in through the customer login (email or phone); a wrong password still says 401', async () => {
+  await verifiedUser({ role: 'admin', email: 'boss@example.com', phone: '+966522222222', authProvider: 'phone', password: 'AdminPassword123' });
+  const wrong = await post('/login', { email: 'boss@example.com', password: 'nope-nope' });
+  assert.equal(wrong.status, 401, 'no hint that the email belongs to an admin');
+  const right = await post('/login', { email: 'boss@example.com', password: 'AdminPassword123' });
+  assert.equal(right.status, 403);
+  assert.equal(right.body.message, 'Use the admin login');
+  assert.equal(right.body.token, undefined);
+  const phone = await post('/phone/login', { phone: '+966522222222', password: 'AdminPassword123' });
+  assert.equal(phone.status, 403);
+  assert.equal(phone.body.token, undefined);
+});
+
 test('phone-number verification only applies to accounts created through phone sign-up', async () => {
   await post('/register', { ...signupBody });
   const code = sentEmails[0].otp;

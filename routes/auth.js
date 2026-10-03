@@ -233,6 +233,10 @@ router.post('/login', async (req, res) => {
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(401).json({ success: false, message: 'Invalid email or password' });
 
+    // Admins sign in only through /api/admin/login (its own limits and shorter session); checked after the
+    // password so this answer never reveals which emails belong to an admin.
+    if (user.role === 'admin') return res.status(403).json({ success: false, message: 'Use the admin login' });
+
     if (!user.isVerified) {
       return res.status(403).json({ success: false, message: 'Please verify your email first', email });
     }
@@ -324,6 +328,8 @@ router.post('/phone/login', async (req, res) => {
     const isMatch = await user.comparePassword(password);
     if (!isMatch) return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
 
+    if (user.role === 'admin') return res.status(403).json({ success: false, message: 'Use the admin login' });
+
     if (user.authProvider !== 'phone') {
       return res.status(403).json({ success: false, message: 'Phone sign-in is not set up for this account. Please sign in with your email.' });
     }
@@ -350,23 +356,38 @@ router.post('/phone/login', async (req, res) => {
 // ================================
 router.post('/social', async (req, res) => {
   try {
-    const { accessToken } = req.body;
-    if (typeof accessToken !== 'string' || !accessToken) {
-      return res.status(400).json({ success: false, message: 'Google login is not configured' });
-    }
-    const tokenInfo = await axios.get('https://oauth2.googleapis.com/tokeninfo', {
-      params: { access_token: accessToken }, timeout: 5000,
-    });
-    if (!GOOGLE_AUDIENCES.includes(tokenInfo.data.aud) || Number(tokenInfo.data.expires_in) <= 0) {
-      return res.status(401).json({ success: false, message: 'Invalid Google token' });
-    }
-    const profile = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
-      headers: { Authorization: `Bearer ${accessToken}` }, timeout: 5000,
-    });
-    const { name: fullName, sub: googleId, picture, email_verified } = profile.data;
-    const email = normEmail(profile.data.email);
-    if (!email || !googleId || email_verified !== true) {
-      return res.status(401).json({ success: false, message: 'Google email is not verified' });
+    const { accessToken, idToken } = req.body;
+    let fullName, googleId, picture, email;
+    if (typeof idToken === 'string' && idToken) {
+      // Mobile app: the Google ID token is verified by Google (signature, expiry) and its audience is checked here.
+      const info = await axios.get('https://oauth2.googleapis.com/tokeninfo', { params: { id_token: idToken }, timeout: 5000 });
+      const d = info.data || {};
+      if (!GOOGLE_AUDIENCES.includes(d.aud) || Number(d.exp) * 1000 <= Date.now()) {
+        return res.status(401).json({ success: false, message: 'Invalid Google token' });
+      }
+      email = normEmail(d.email);
+      googleId = d.sub; fullName = d.name; picture = d.picture;
+      if (!email || !googleId || !(d.email_verified === true || d.email_verified === 'true')) {
+        return res.status(401).json({ success: false, message: 'Google email is not verified' });
+      }
+    } else {
+      if (typeof accessToken !== 'string' || !accessToken) {
+        return res.status(400).json({ success: false, message: 'Google login is not configured' });
+      }
+      const tokenInfo = await axios.get('https://oauth2.googleapis.com/tokeninfo', {
+        params: { access_token: accessToken }, timeout: 5000,
+      });
+      if (!GOOGLE_AUDIENCES.includes(tokenInfo.data.aud) || Number(tokenInfo.data.expires_in) <= 0) {
+        return res.status(401).json({ success: false, message: 'Invalid Google token' });
+      }
+      const profile = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` }, timeout: 5000,
+      });
+      ({ name: fullName, sub: googleId, picture } = profile.data);
+      email = normEmail(profile.data.email);
+      if (!email || !googleId || profile.data.email_verified !== true) {
+        return res.status(401).json({ success: false, message: 'Google email is not verified' });
+      }
     }
 
     let user = await User.findOne({ email });

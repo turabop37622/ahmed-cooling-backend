@@ -91,6 +91,18 @@ const userSchema = new mongoose.Schema({
   googleProfile: {
     displayName: String,
     picture:     String
+  },
+
+  // ── Push notification device tokens (max ~5 per user) ──
+  pushTokens: {
+    type: [{
+      _id: false,
+      token:     { type: String, required: true },
+      platform:  { type: String, enum: ['android', 'ios'], default: 'android' },
+      kind:      { type: String, enum: ['fcm', 'expo'], default: 'expo' },
+      updatedAt: { type: Date, default: Date.now }
+    }],
+    default: []
   }
 
 }, { timestamps: true });
@@ -129,6 +141,7 @@ userSchema.methods.toJSON = function () {
   delete obj.otpExpires;
   delete obj.otpPurpose;
   delete obj.otpAttempts;
+  delete obj.pushTokens;
   return obj;
 };
 
@@ -139,6 +152,7 @@ userSchema.methods.toJSONWithOTP = function () {
   delete obj.verificationToken;
   delete obj.resetPasswordToken;
   delete obj.resetPasswordExpires;
+  delete obj.pushTokens;
   return obj;
 };
 

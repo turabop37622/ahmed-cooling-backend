@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const { isIsoDate, riyadhDate } = require('./schedule');
 
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
@@ -52,12 +53,9 @@ const rejectMongoOperators = (req, res, next) => {
   next();
 };
 
+// "Today" is the date in Asia/Riyadh (the business only serves Saudi Arabia), so yesterday is never accepted.
 const isFutureOrToday = (isoDate) => {
-  if (typeof isoDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return false;
-  const parsed = new Date(`${isoDate}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== isoDate) return false;
-  // Allow "today" in any timezone (UTC-12 .. UTC+14) by tolerating one day of slack.
-  return parsed.getTime() >= Date.now() - 36 * 60 * 60 * 1000;
+  return isIsoDate(isoDate) && isoDate >= riyadhDate();
 };
 
 // The booking page sends '09:00 AM'-style slots, or 'Anytime' when no slot is picked.

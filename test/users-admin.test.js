@@ -71,7 +71,7 @@ const call = async (method, path, who, body) => {
   return { status: res.status, json, text };
 };
 
-test('deleting an account with a password works (no crash on the missing Invoice model) and keeps anonymised bookings', async () => {
+test('deleting an account with a password works and keeps anonymised bookings', async () => {
   const wrong = await call('DELETE', '/users/account', ID.customer, { password: 'nope' });
   assert.equal(wrong.status, 401);
   assert.equal(deleted, null);
@@ -139,12 +139,25 @@ test('admin routes: customers are refused, page size is capped, bad ids are not 
   assert.equal((await call('GET', '/admin/bookings')).status, 401);
   const list = await call('GET', '/admin/bookings?limit=100000&page=-5&status[$ne]=x', ID.admin);
   assert.equal(list.status, 400, 'operator in the query string is refused');
-  const capped = await call('GET', '/admin/bookings?limit=100000&page=-5', ID.admin);
-  assert.equal(capped.status, 200);
-  assert.equal(bookingQuery.limit, 100);
-  assert.equal(bookingQuery.skip, 0);
-  Booking.findOneAndDelete = async () => null;
-  assert.equal((await call('DELETE', '/admin/bookings/not-an-id', ID.admin)).status, 404);
+  const realAggregate = Booking.aggregate;
+  let pipeline;
+  Booking.aggregate = async (p) => { pipeline = p; return [{ byStatus: [], emergency: [], total: [], rows: [] }]; };
+  try {
+    const capped = await call('GET', '/admin/bookings?limit=100000&page=-5', ID.admin);
+    assert.equal(capped.status, 200);
+    const rows = pipeline.at(-1).$facet.rows;
+    assert.equal(rows.find((s) => s.$limit).$limit, 100);
+    assert.equal(rows.find((s) => '$skip' in s).$skip, 0);
+  } finally {
+    Booking.aggregate = realAggregate;
+  }
+  const realFindOne = Booking.findOne;
+  Booking.findOne = () => { const q = { select: () => q, lean: async () => null }; return q; };
+  try {
+    assert.equal((await call('DELETE', '/admin/bookings/not-an-id', ID.admin)).status, 404);
+  } finally {
+    Booking.findOne = realFindOne;
+  }
   assert.equal((await call('GET', '/admin/users/not-an-id/bookings', ID.admin)).status, 404);
 });
 

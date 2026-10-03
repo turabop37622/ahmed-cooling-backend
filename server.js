@@ -2,19 +2,26 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const jwt = require('jsonwebtoken');
 const axios = require('axios');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
 
 const { rejectMongoOperators } = require('./utils/security');
 const { mountAuthLimiters, geocodeLimiter } = require('./utils/limiters');
 
 const app = express();
+// Render sets RENDER=true on its instances, so production behaviour does not depend on NODE_ENV being set there.
+const IS_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
 
 // Render/Vercel sit behind a proxy: without this every visitor shares the proxy's IP and the rate limiters
-// either lock out everybody or protect nobody.
-app.set('trust proxy', Number(process.env.TRUST_PROXY || 1));
+// either lock out everybody or protect nobody. Locally there is no proxy, and trusting X-Forwarded-For would let
+// anyone pick their own IP. TRUST_PROXY: a hop count ("1"), "true"/"false", or an Express trust value ("loopback").
+const parseTrustProxy = (raw) => {
+  if (raw === undefined || raw === '') return IS_PRODUCTION ? 1 : false;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return /^\d+$/.test(raw) ? Number(raw) : raw;
+};
+app.set('trust proxy', parseTrustProxy(process.env.TRUST_PROXY));
 
 // ============================================
 // SECURITY MIDDLEWARE
@@ -24,14 +31,20 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-const allowedOrigins = [
+// CORS allowlist: CORS_ORIGINS (comma separated) replaces the built-in production list. Local dev origins are
+// added outside production only; in production any localhost/127.0.0.1 origin is dropped even if listed.
+const DEFAULT_ORIGINS = [
   'https://ahmedcoolingworkshop.com',
   'https://www.ahmedcoolingworkshop.com',
   'https://ahmed-cooling-web.vercel.app',
-  'http://localhost:3000',
-  'http://localhost:8081',
-  'http://localhost:19006',
 ];
+const DEV_ORIGINS = ['http://localhost:3000', 'http://localhost:8081', 'http://localhost:19006'];
+const isLocalOrigin = (origin) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin);
+const configuredOrigins = (process.env.CORS_ORIGINS || '').split(',').map((o) => o.trim().replace(/\/+$/, '')).filter(Boolean);
+const allowedOrigins = [...new Set([
+  ...(configuredOrigins.length ? configuredOrigins : DEFAULT_ORIGINS),
+  ...(IS_PRODUCTION ? [] : DEV_ORIGINS),
+])].filter((origin) => !(IS_PRODUCTION && isLocalOrigin(origin)));
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -57,6 +70,16 @@ mountAuthLimiters(app);
 // listener). Until the database is connected and the routes are mounted, the API answers 503 instead of hanging.
 let routesReady = false;
 const dbConnected = () => mongoose.connection.readyState === 1;
+
+// Always-200 liveness ping that never touches MongoDB. Point an uptime monitor (UptimeRobot / cron-job.org, every
+// 5 minutes) at /ping to keep a sleeping Render instance warm; the website also pings it once per visit.
+// helmet sends Cross-Origin-Resource-Policy: same-origin, which makes the browser block the website's no-cors ping
+// (ERR_BLOCKED_BY_RESPONSE.NotSameOrigin). This route returns nothing sensitive, so it may be read cross-origin.
+app.get('/ping', (req, res) => {
+  res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.set('Cache-Control', 'no-store');
+  res.status(200).send('ok');
+});
 
 app.get('/api/health', (req, res) => {
   const connected = dbConnected();
@@ -1320,7 +1343,7 @@ if (!MONGODB_URI) {
 // ============================================
 // MODELS (Loaded after DB connect)
 // ============================================
-let Booking, User, Service, Notification, Product;
+let User;
 
 // ============================================
 // AUTH MIDDLEWARE
@@ -1381,44 +1404,42 @@ async function startServer() {
     // ============================================
     // LOAD MODELS AFTER CONNECTION
     // ============================================
-    Booking      = require('./models/Booking');
-    User         = require('./models/User');
-    Service      = require('./models/Service');
-    Notification = require('./models/Notification');
-    Product      = require('./models/Products');
+    require('./models/Booking');
+    User = require('./models/User');
+    require('./models/Service');
+    require('./models/Notification');
+    require('./models/Products');
 
     console.log('✅ Models loaded successfully');
 
-    // Ensure Admin user exists — credentials from environment variables only
-    const ADMIN_SEED_EMAIL = process.env.ADMIN_SEED_EMAIL;
-    const ADMIN_SEED_PASSWORD = process.env.ADMIN_SEED_PASSWORD;
-    if (ADMIN_SEED_EMAIL && ADMIN_SEED_PASSWORD && ADMIN_SEED_PASSWORD.length < 12) {
-      console.warn('⚠️ ADMIN_SEED_PASSWORD is shorter than 12 characters — refusing to seed the admin account. Use a longer password.');
-    } else if (ADMIN_SEED_EMAIL && ADMIN_SEED_PASSWORD) {
+    // First-boot admin seed — credentials from environment variables only. An admin is created ONLY when the
+    // database has no admin at all; an existing (or renamed) admin is never touched, and a deleted admin is only
+    // recreated if it was the last one (remove ADMIN_SEED_* after the first boot so that cannot happen silently).
+    const ADMIN_SEED_EMAIL = (process.env.ADMIN_SEED_EMAIL || '').trim().toLowerCase();
+    const ADMIN_SEED_PASSWORD = process.env.ADMIN_SEED_PASSWORD || '';
+    if (ADMIN_SEED_EMAIL || ADMIN_SEED_PASSWORD) {
       try {
-        let adminDoc = await User.findOne({ email: ADMIN_SEED_EMAIL });
-        if (!adminDoc) {
-          adminDoc = await User.findOne({ role: 'admin' });
-        }
-        if (adminDoc) {
-          console.log('Admin account already exists; startup seed left it unchanged');
+        const adminCount = await User.countDocuments({ role: 'admin' });
+        if (adminCount > 0) {
+          console.warn('⚠️ ADMIN_SEED_EMAIL/ADMIN_SEED_PASSWORD are set but an admin already exists — remove ADMIN_SEED_* from the environment.');
+        } else if (!ADMIN_SEED_EMAIL || ADMIN_SEED_PASSWORD.length < 16 || ADMIN_SEED_PASSWORD.length > 72) {
+          console.warn('⚠️ Admin seed skipped: set ADMIN_SEED_EMAIL and an ADMIN_SEED_PASSWORD of 16 to 72 characters.');
+        } else if (await User.exists({ email: ADMIN_SEED_EMAIL })) {
+          console.warn('⚠️ Admin seed skipped: ADMIN_SEED_EMAIL belongs to an existing non-admin account (it is never promoted automatically).');
         } else {
-          adminDoc = new User({
+          await new User({
             fullName: 'Ahmed Admin',
             email: ADMIN_SEED_EMAIL,
             password: ADMIN_SEED_PASSWORD,
             role: 'admin',
             isVerified: true,
-            authProvider: 'local'
-          });
-          await adminDoc.save();
-          console.log('🔒 Admin user created in MongoDB with encrypted bcrypt password');
+            authProvider: 'local',
+          }).save();
+          console.warn('🔒 Admin user created from ADMIN_SEED_*. Remove ADMIN_SEED_EMAIL and ADMIN_SEED_PASSWORD from the environment now.');
         }
       } catch (seedErr) {
         console.warn('⚠️ Admin seed warning:', seedErr.message);
       }
-    } else {
-      console.log('ℹ️ ADMIN_SEED_EMAIL/ADMIN_SEED_PASSWORD not set — skipping admin seed');
     }
 
     // ============================================
@@ -1455,6 +1476,7 @@ async function startServer() {
     const adminRoutes = require('./routes/admin');
     app.use('/api/admin', adminRoutes);
     app.use('/api/users', require('./routes/users'));
+    app.use('/api/notifications', require('./routes/notifications'));
     app.use('/api', require('./routes/feedback'));
     console.log('✅ Admin routes loaded');
 
@@ -1572,8 +1594,10 @@ async function startServer() {
 process.on('unhandledRejection', (reason) => {
   console.error('🔴 Unhandled promise rejection:', reason);
 });
+// After an uncaught exception the process state is unknown: log it and exit so Render restarts a clean instance.
 process.on('uncaughtException', (err) => {
-  console.error('🔴 Uncaught exception:', err);
+  console.error('🔴 Uncaught exception — exiting:', err);
+  process.exit(1);
 });
 
 mongoose.connection.on('error', (err) => console.error('🔴 MongoDB connection error:', err.message));

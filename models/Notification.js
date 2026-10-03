@@ -35,7 +35,11 @@ const notificationSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
-  expiresAt: Date
+  // Every notification expires 90 days after it is created (TTL index below); utils/notify.js sets the same value.
+  expiresAt: {
+    type: Date,
+    default: () => new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+  }
 }, {
   timestamps: true
 });

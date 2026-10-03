@@ -147,8 +147,8 @@ router.get('/bookings', auth, async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
-    const query = { user: req.user.id };
-    if (typeof req.query.status === 'string' && req.query.status) query.status = req.query.status;
+    const query = { user: req.user.id, deletedAt: null }; // bookings soft-deleted by the admin are hidden
+    if (typeof req.query.status === 'string' && OPEN_STATUSES.concat(['completed', 'cancelled']).includes(req.query.status)) query.status = req.query.status;
 
     const bookings = await Booking.find(query)
       .populate('technician', 'fullName phone')

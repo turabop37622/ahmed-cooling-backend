@@ -58,7 +58,21 @@ test('bookings require login, ignore client price and owner, and reject other ow
     const packageCreated = await fetch(`${url}/public`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(packageRequest) });
     assert.equal(packageCreated.status, 201);
     assert.equal(saved.servicePrice, 1200);
-    assert.equal(saved.totalAmount, 1230); // 1200 + 30 visit fee
+    assert.equal(saved.visitCharges, 0);
+    assert.equal(saved.totalAmount, 1200); // package price already includes the visit fee
+
+    // The home-page packages are bookable at the same price the website shows (visit fee included)
+    for (const [id, price] of [['pkg_diagnostic', 150], ['pkg_summer', 280]]) {
+      const r = await fetch(`${url}/public`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ ...body, service: id }) });
+      assert.equal(r.status, 201, id);
+      assert.equal(saved.service.id, id);
+      assert.equal(saved.servicePrice, price);
+      assert.equal(saved.totalAmount, price);
+    }
+
+    // Unknown ids are still rejected
+    const unknown = await fetch(`${url}/public`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ ...body, service: 'pkg_nope' }) });
+    assert.equal(unknown.status, 404);
 
     const reschedule = await fetch(`${url}/${serviceId}/reschedule`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ date: FUTURE2, time: '11:00 AM' }) });
     assert.equal(reschedule.status, 403);
