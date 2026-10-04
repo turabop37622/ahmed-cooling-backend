@@ -1,0 +1,16 @@
+# Render's free instance sleeps after ~15 minutes without traffic, and the first visitor then waits for it to
+# wake up. Ping it every 10 minutes so the site and app stay fast. (GitHub may delay scheduled runs a little.)
+name: Keep backend warm
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping the API
+        run: curl -fsS --max-time 90 --retry 2 --retry-delay 10 https://ahmed-cooling-backend.onrender.com/ping
