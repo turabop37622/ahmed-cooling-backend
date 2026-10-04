@@ -70,7 +70,7 @@ const VISIT_CHARGE = (() => {
   const n = raw === undefined || raw === '' ? NaN : Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : 30; // a bad env value must never turn into NaN prices
 })();
-const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '';
+const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '+966 54 448 3745';
 // Email subjects are plain text (not HTML), so they use the raw values — just without line breaks.
 const subjectLine = (text) => String(text).replace(/[\r\n]+/g, ' ').slice(0, 200);
 const ownsBooking = (booking, user) => user.role === 'admin' || (booking.user && booking.user.toString() === String(user.id));
