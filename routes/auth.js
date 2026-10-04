@@ -126,7 +126,7 @@ router.post('/register', async (req, res) => {
 
     // The code goes to the email address, which proves the person owns it.
     try {
-      await sendEmail(email, otp, PURPOSE_VERIFY);
+      await sendEmail(email, otp, PURPOSE_VERIFY, { name: user.fullName });
     } catch (emailErr) {
       console.error('❌ Verification email failed:', emailErr.message);
       return res.status(502).json({ success: false, message: 'Could not send the verification code. Please try again.' });
@@ -201,7 +201,7 @@ router.post('/resend-otp', async (req, res) => {
     }
     const otp = await issueOtp(user, PURPOSE_VERIFY);
     try {
-      await sendEmail(user.email, otp, PURPOSE_VERIFY);
+      await sendEmail(user.email, otp, PURPOSE_VERIFY, { name: user.fullName });
     } catch (emailErr) {
       console.error('❌ Resend email failed:', emailErr.message);
     }
@@ -299,7 +299,7 @@ router.post('/phone/register', async (req, res) => {
     const otp = await issueOtp(user, PURPOSE_VERIFY);
 
     try {
-      await sendEmail(email, otp, PURPOSE_VERIFY);
+      await sendEmail(email, otp, PURPOSE_VERIFY, { name: user.fullName });
     } catch (emailErr) {
       console.error('❌ Verification email failed:', emailErr.message);
       return res.status(502).json({ success: false, message: 'Could not send the verification code. Please try again.' });
@@ -447,7 +447,7 @@ router.post('/forgot-password', async (req, res) => {
     }
     const otp = await issueOtp(user, PURPOSE_RESET);
     try {
-      await sendEmail(email, otp, PURPOSE_RESET);
+      await sendEmail(email, otp, PURPOSE_RESET, { name: user.fullName });
     } catch (emailError) {
       console.error('❌ Reset email send failed:', emailError.message);
     }
