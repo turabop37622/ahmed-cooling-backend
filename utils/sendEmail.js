@@ -7,8 +7,8 @@ const axios = require('axios');
 const SITE_URL = 'https://www.ahmedcoolingworkshop.com';
 const LOGO_URL = `${SITE_URL}/logo-en.png`;
 const SUPPORT_EMAIL = 'ahmedcoolingworkshop@gmail.com';
-const SUPPORT_PHONE = '+966 59 019 2146';
-const WHATSAPP_URL = 'https://wa.me/966590192146';
+const SUPPORT_PHONE = '+966 54 448 3745';
+const WHATSAPP_URL = 'https://wa.me/966544483745';
 const EXPIRES_MINUTES = 10;
 
 const COPY = {
@@ -158,7 +158,7 @@ function buildHtml({ code, purpose, name }) {
             Need help? &nbsp;·&nbsp; <span dir="rtl">تحتاج مساعدة؟</span><br>
             <a href="${WHATSAPP_URL}" style="color:#16A34A;text-decoration:none;font-weight:700;">WhatsApp</a>
             &nbsp;·&nbsp;
-            <a href="tel:+966590192146" style="color:#2563EB;text-decoration:none;font-weight:700;" dir="ltr">${SUPPORT_PHONE}</a>
+            <a href="tel:+966544483745" style="color:#2563EB;text-decoration:none;font-weight:700;" dir="ltr">${SUPPORT_PHONE}</a>
             &nbsp;·&nbsp;
             <a href="mailto:${SUPPORT_EMAIL}" style="color:#2563EB;text-decoration:none;font-weight:700;">${SUPPORT_EMAIL}</a>
           </td>
