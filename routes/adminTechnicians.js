@@ -10,7 +10,7 @@ const AppSetting = require('../models/AppSetting');
 const AuditLog = require('../models/AuditLog');
 const technicianStats = require('../utils/technicianStats');
 const { getCommissionRate, validRate, round2 } = require('../utils/commission');
-const { validatePhone, normalizePhone, phoneVariants } = require('../utils/phone');
+const { validateAnyPhone, normalizeAnyPhone, phoneVariants } = require('../utils/phone');
 const { normEmail, isEmail, cleanStr } = require('../utils/security');
 
 const NOT_DELETED = { deletedAt: null };
@@ -43,9 +43,10 @@ const parseTechnicianInput = (body = {}, { partial = false } = {}) => {
     values.fullName = name;
   }
   if (!partial || has('phone')) {
-    const check = validatePhone(body.phone);
+    // Any mobile number (Saudi or another country) can be a technician's login
+    const check = validateAnyPhone(body.phone);
     if (!check.valid) return { error: check.msg };
-    values.phone = normalizePhone(body.phone);
+    values.phone = normalizeAnyPhone(body.phone);
   }
   if (has('email') && body.email !== null && body.email !== '') {
     const email = normEmail(body.email);
@@ -139,14 +140,17 @@ router.get('/technicians', async (req, res) => {
 });
 
 const duplicateMessage = 'An account with this phone number or email already exists';
+const STAFF_ROLES = ['technician', 'admin'];
 
 router.post('/technicians', async (req, res) => {
   try {
     const parsed = parseTechnicianInput(req.body, { partial: false });
     if (parsed.error) return badRequest(res, parsed.error);
     const v = parsed.values;
-    if (await User.findOne({ phone: { $in: phoneVariants(v.phone) } }).select('_id').lean()) {
-      return res.status(409).json({ success: false, message: 'An account with this phone number already exists' });
+    // A customer account with the same number does not block it (the phone login picks the account whose password
+    // matches); only another technician or admin with this number does.
+    if (await User.findOne({ phone: { $in: phoneVariants(v.phone) }, role: { $in: STAFF_ROLES } }).select('_id').lean()) {
+      return res.status(409).json({ success: false, message: 'Another technician already uses this phone number' });
     }
     if (v.email && await User.findOne({ email: v.email }).select('_id').lean()) {
       return res.status(409).json({ success: false, message: 'An account with this email already exists' });
@@ -188,8 +192,8 @@ router.patch('/technicians/:id', async (req, res) => {
     const beforeView = auditView(shapeTechnician(found.user, found.profile, null));
     const id = found.user._id;
 
-    if (v.phone && await User.findOne({ phone: { $in: phoneVariants(v.phone) }, _id: { $ne: id } }).select('_id').lean()) {
-      return res.status(409).json({ success: false, message: 'An account with this phone number already exists' });
+    if (v.phone && await User.findOne({ phone: { $in: phoneVariants(v.phone) }, role: { $in: STAFF_ROLES }, _id: { $ne: id } }).select('_id').lean()) {
+      return res.status(409).json({ success: false, message: 'Another technician already uses this phone number' });
     }
     if (v.email && await User.findOne({ email: v.email, _id: { $ne: id } }).select('_id').lean()) {
       return res.status(409).json({ success: false, message: 'An account with this email already exists' });

@@ -27,8 +27,6 @@ const userSchema = new mongoose.Schema({
   // ── Phone auth (NEW) ──
   phone: {
     type: String,
-    unique: true,
-    sparse: true,        // ✅ email-only users ke liye null allow
     trim: true
   },
   isPhoneVerified: {
@@ -155,5 +153,9 @@ userSchema.methods.toJSONWithOTP = function () {
   delete obj.pushTokens;
   return obj;
 };
+
+// One account per phone number and role: a technician may use the same number as their own customer account
+// (the phone login picks the account whose password matches). Email-only users have no phone.
+userSchema.index({ phone: 1, role: 1 }, { unique: true, partialFilterExpression: { phone: { $type: 'string' } } });
 
 module.exports = mongoose.model('User', userSchema);

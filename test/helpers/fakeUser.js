@@ -32,6 +32,12 @@ class FakeUser {
     return FakeUser.store.find((doc) => matches(doc, filter)) || null;
   }
 
+  // find(filter).limit(n) -> matching documents
+  static find(filter) {
+    const docs = FakeUser.store.filter((doc) => matches(doc, filter));
+    return { limit: (n) => Promise.resolve(docs.slice(0, n)), then: (ok, ko) => Promise.resolve(docs).then(ok, ko) };
+  }
+
   // Only what utils/otp.js needs: an atomic $inc guarded by the filter.
   static async findOneAndUpdate(filter, update) {
     const doc = FakeUser.store.find((d) => String(d._id) === String(filter._id));

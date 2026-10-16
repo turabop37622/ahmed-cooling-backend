@@ -47,7 +47,26 @@ const validatePhone = (phone) => {
   return { valid: false, msg: 'Saudi number must be +966 5XXXXXXXX (9 digits starting with 5)' };
 };
 
+// Technicians may use any mobile number (e.g. a home-country SIM). Saudi numbers keep the canonical +9665XXXXXXXX;
+// any other number is stored as + and 7-15 digits (00 prefix -> +). A number without a country code that is not a
+// Saudi mobile is assumed to be Saudi only when it looks like one, otherwise it is kept as typed digits.
+const normalizeAnyPhone = (phone) => {
+  const saudi = canonicalSaudiMobile(phone);
+  if (saudi) return saudi;
+  const ascii = toAsciiDigits(String(phone ?? '')).trim();
+  const digits = ascii.replace(/\D/g, '');
+  if (ascii.startsWith('+')) return `+${digits}`;
+  if (digits.startsWith('00')) return `+${digits.slice(2)}`;
+  return digits;
+};
+const validateAnyPhone = (phone) => {
+  if (typeof phone !== 'string' || !phone.trim()) return { valid: false, msg: 'Phone number is required' };
+  const n = normalizeAnyPhone(phone).replace('+', '');
+  if (!/^\d{7,15}$/.test(n)) return { valid: false, msg: 'Enter a valid mobile number (7 to 15 digits)' };
+  return { valid: true };
+};
+
 // Saudi Arabia only: every booking is in Saudi Arabia and priced in SAR.
 const countryFromPhone = () => ({ country: 'Saudi Arabia', currency: 'SAR' });
 
-module.exports = { normalizePhone, canonicalSaudiMobile, phoneVariants, validatePhone, countryFromPhone, toAsciiDigits };
+module.exports = { normalizePhone, canonicalSaudiMobile, phoneVariants, validatePhone, countryFromPhone, toAsciiDigits, normalizeAnyPhone, validateAnyPhone };

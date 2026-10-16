@@ -103,7 +103,7 @@ router.post('/register', async (req, res) => {
 
     // Look at both first and only delete stale rows once we know the sign-up can go ahead.
     const existingUser = await User.findOne({ email });
-    const existingPhone = await User.findOne({ phone: { $in: phoneVariants(phone) } });
+    const existingPhone = await User.findOne({ phone: { $in: phoneVariants(phone) }, role: 'customer' });
     if (existingUser && !isStaleUnverified(existingUser)) {
       return res.status(400).json({ success: false, message: 'User already exists with this email' });
     }
@@ -158,7 +158,7 @@ router.post('/verify-otp', async (req, res) => {
     // By phone number only for accounts created through phone sign-up; email accounts verify by email.
     const user = email
       ? await User.findOne({ email })
-      : await User.findOne({ phone: { $in: phoneVariants(phone) }, authProvider: 'phone' });
+      : await User.findOne({ phone: { $in: phoneVariants(phone) }, authProvider: 'phone', role: 'customer' });
     if (!user || (user.isVerified && user.isPhoneVerified)) return invalidCode(res);
     if (!(await checkOtp(user, otp, PURPOSE_VERIFY))) return invalidCode(res);
 
@@ -194,7 +194,7 @@ router.post('/resend-otp', async (req, res) => {
 
     const user = email
       ? await User.findOne({ email })
-      : await User.findOne({ phone: { $in: phoneVariants(phone) }, authProvider: 'phone' });
+      : await User.findOne({ phone: { $in: phoneVariants(phone) }, authProvider: 'phone', role: 'customer' });
 
     if (!user || user.isVerified || user.role !== 'customer' || !user.email || !canIssueOtp(user)) {
       return res.status(200).json(generic);
@@ -281,7 +281,7 @@ router.post('/phone/register', async (req, res) => {
     const normalizedPhone = normalizePhone(phone);
 
     // An existing account is never overwritten — only accounts that never finished sign-up are replaced.
-    const existingPhone = await User.findOne({ phone: { $in: phoneVariants(phone) } });
+    const existingPhone = await User.findOne({ phone: { $in: phoneVariants(phone) }, role: 'customer' });
     const existingEmail = await User.findOne({ email });
     if (existingPhone && !isStaleUnverified(existingPhone)) {
       return res.status(409).json({ success: false, message: 'Phone already registered. Please sign in.' });
@@ -322,11 +322,17 @@ router.post('/phone/login', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Phone and password are required' });
     }
 
-    const user = await User.findOne({ phone: { $in: phoneVariants(phone) } });
+    // The same number can belong to a customer and a technician account: use the one whose password matches
+    // (technician first, so a technician whose customer account shares the password lands in the technician app).
+    const candidates = await User.find({ phone: { $in: phoneVariants(phone) } }).limit(5);
+    const order = { technician: 0, customer: 1, admin: 2 };
+    candidates.sort((a, b) => (order[a.role] ?? 3) - (order[b.role] ?? 3));
+    let user = null;
+    for (const candidate of candidates) {
+      // eslint-disable-next-line no-await-in-loop
+      if (await candidate.comparePassword(password)) { user = candidate; break; }
+    }
     if (!user) return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
-
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
 
     if (user.role === 'admin') return res.status(403).json({ success: false, message: 'Use the admin login' });
 

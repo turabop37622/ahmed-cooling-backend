@@ -175,11 +175,14 @@ test('admin technician input validation (create and edit)', () => {
   assert.equal(ok.error, undefined);
   assert.deepEqual(ok.values, { fullName: 'Ali Hassan', phone: '+966551234567', password: 'longpass1', cities: ['jeddah'], specialties: ['ac'], autoAssign: true, active: true, availability: true });
   for (const [label, bad] of [
-    ['name', { fullName: 'A' }], ['phone', { phone: '+923001234567' }], ['short password', { password: 'short7!' }],
+    ['name', { fullName: 'A' }], ['phone', { phone: '12' }], ['short password', { password: 'short7!' }],
     ['long password', { password: 'x'.repeat(73) }], ['city', { cities: ['riyadh'] }], ['cities type', { cities: 'jeddah' }],
     ['specialty', { specialties: ['freezer'] }], ['autoAssign type', { autoAssign: 'yes' }], ['email', { email: 'nope' }],
   ]) assert.ok(p({ ...good, ...bad }).error, label);
   assert.ok(p({ ...good, password: undefined }).error, 'password required on create');
+  // Any real mobile number is accepted for a technician (not only Saudi ones)
+  assert.equal(p({ ...good, phone: '+92 300 1234567' }).values.phone, '+923001234567');
+  assert.equal(p({ ...good, phone: '00923001234567' }).values.phone, '+923001234567');
 
   assert.ok(p({}, { partial: true }).error, 'empty edit');
   assert.deepEqual(p({ availability: false }, { partial: true }).values, { availability: false });
@@ -294,8 +297,11 @@ test('admin edits a technician: toggles, 404 for non-technicians, 409 for a take
   assert.deepEqual(profiles[0].cities, ['jeddah', 'makkah']);
   assert.equal((await call('PATCH', `/admin/technicians/${ADMIN}`, ADMIN, { active: false })).status, 404, 'not a technician');
   assert.equal((await call('PATCH', `/admin/technicians/${TECH}`, ADMIN, {})).status, 400);
+  // A customer account with the number does not block it; another technician does
   users.push({ _id: OTHER_TECH, role: 'customer', phone: '+966570000000' });
-  assert.equal((await call('PATCH', `/admin/technicians/${TECH}`, ADMIN, { phone: '0570000000' })).status, 409);
+  assert.equal((await call('PATCH', `/admin/technicians/${TECH}`, ADMIN, { phone: '0570000000' })).status, 200);
+  users.push({ _id: '0000000000000000000000ff', role: 'technician', phone: '+966580000000' });
+  assert.equal((await call('PATCH', `/admin/technicians/${TECH}`, ADMIN, { phone: '0580000000' })).status, 409);
 });
 
 test('admin records a settlement; the balance goes down; invalid amounts are refused', async () => {
