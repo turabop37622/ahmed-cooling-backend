@@ -10,6 +10,7 @@ process.env.JWT_SECRET = 'test-only-secret-for-booking-security';
 const User = require('../models/User');
 const Service = require('../models/Service');
 const Booking = require('../models/Booking');
+const autoAssign = require('../utils/autoAssign');
 const router = require('../routes/bookings');
 const FUTURE = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
 const FUTURE2 = new Date(Date.now() + 4 * 86400000).toISOString().slice(0, 10);
@@ -22,7 +23,9 @@ test('bookings require login, ignore client price and owner, and reject other ow
     findBooking: Booking.findById,
     findOneBooking: Booking.findOne,
     axiosPost: axios.post,
+    autoAssign: autoAssign.autoAssignBooking,
   };
+  autoAssign.autoAssignBooking = async () => null; // no technician matches (no database in this test)
   const userId = '507f1f77bcf86cd799439011';
   const otherId = '507f1f77bcf86cd799439012';
   const serviceId = '507f1f77bcf86cd799439013';
@@ -84,6 +87,7 @@ test('bookings require login, ignore client price and owner, and reject other ow
     Booking.create = originals.createBooking;
     Booking.findById = originals.findBooking;
     Booking.findOne = originals.findOneBooking;
+    autoAssign.autoAssignBooking = originals.autoAssign;
     axios.post = originals.axiosPost;
   }
 });

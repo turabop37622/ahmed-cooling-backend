@@ -15,6 +15,8 @@ const Booking = require('../models/Booking');
 const Notification = require('../models/Notification');
 const Technician = require('../models/Technician');
 const AuditLog = require('../models/AuditLog');
+const AppSetting = require('../models/AppSetting');
+const autoAssign = require('../utils/autoAssign');
 const router = require('../routes/bookings');
 
 const day = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
@@ -48,7 +50,7 @@ const matchesFilter = (doc, filter) => Object.entries(filter).every(([key, cond]
 const applyUpdate = (doc, update) => {
   for (const [k, v] of Object.entries(update.$set || {})) doc[k] = v;
   for (const k of Object.keys(update.$unset || {})) delete doc[k];
-  for (const [k, v] of Object.entries(update.$push || {})) (doc[k] = doc[k] || []).push(v);
+  for (const [k, v] of Object.entries(update.$push || {})) (doc[k] = doc[k] || []).push(...(v && Array.isArray(v.$each) ? v.$each : [v]));
 };
 let updates; // every conditional update that was applied
 let notifications; // every in-app notification saved
@@ -58,6 +60,8 @@ let base;
 let db; // the booking the mocked model returns
 let emails;
 let techProfile; // Technician profile returned for the assigned technician
+let settingDoc; // AppSetting document (commission rate)
+let autoAssignResult; // what utils/autoAssign returns for a new booking (or a function of the booking)
 const originals = {};
 
 test.before(async () => {
@@ -67,6 +71,10 @@ test.before(async () => {
   originals.notificationSave = Notification.prototype.save;
   originals.auditRecord = AuditLog.record;
   originals.userFindOne = User.findOne;
+  originals.settingFindOne = AppSetting.findOne;
+  originals.autoAssign = autoAssign.autoAssignBooking;
+  AppSetting.findOne = () => ({ lean: async () => settingDoc });
+  autoAssign.autoAssignBooking = async (booking) => (typeof autoAssignResult === 'function' ? autoAssignResult(booking) : autoAssignResult);
   User.findById = (id) => { const u = accounts[String(id)] || null; return { select: async () => u, then: (r, j) => Promise.resolve(u).then(r, j) }; };
   User.findOne = async (filter) => Object.values(accounts).find((a) => String(a._id) === String(filter._id) && a.role === filter.role) || null;
   Notification.prototype.save = async function () { notifications.push(this); return this; };
@@ -99,12 +107,16 @@ test.after(async () => {
   Notification.prototype.save = originals.notificationSave;
   AuditLog.record = originals.auditRecord;
   User.findOne = originals.userFindOne;
+  AppSetting.findOne = originals.settingFindOne;
+  autoAssign.autoAssignBooking = originals.autoAssign;
 });
 test.beforeEach(() => {
   emails = [];
   updates = [];
   notifications = [];
   techProfile = { user: IDS.tech, active: true, availability: true };
+  settingDoc = null;
+  autoAssignResult = null;
   db = makeBooking();
   Booking.findById = async () => db;
   Booking.findOne = async () => null;
@@ -445,9 +457,7 @@ test('admin cancel records the reason (default "Cancelled by admin") and never t
   assert.equal(db.cancellationReason, 'Cancelled by admin');
 });
 
-test('assign: technician must exist, be active and available; repeat assignment is a 409; pending must be confirmed first', async () => {
-  db = makeBooking({ status: 'pending' });
-  assert.equal((await call('PUT', `/${IDS.booking}/assign`, IDS.admin, { technicianId: IDS.tech })).status, 400);
+test('assign: technician must exist, be active and available; repeat assignment is a 409', async () => {
   db = makeBooking({ status: 'confirmed' });
   techProfile = { user: IDS.tech, active: true, availability: false };
   assert.equal((await call('PUT', `/${IDS.booking}/assign`, IDS.admin, { technicianId: IDS.tech })).status, 400, 'unavailable');
@@ -464,8 +474,45 @@ test('assign: technician must exist, be active and available; repeat assignment 
   const twice = await call('PUT', `/${IDS.booking}/assign`, IDS.admin, { technicianId: IDS.tech });
   assert.equal(twice.status, 409);
   await new Promise((r) => setTimeout(r, 30));
-  assert.equal(notifications.filter((n) => n.data?.event === 'assigned').length, 1, 'customer told once');
-  assert.equal(notifications.filter((n) => n.data?.event === 'assigned_to_you').length, 1, 'technician told once');
+  assert.equal(notifications.filter((n) => n.data?.event === 'assigned' && n.data?.kind !== 'job').length, 1, 'customer told once');
+  const pushes = notifications.filter((n) => n.data?.kind === 'job');
+  assert.equal(pushes.length, 1, 'technician told once');
+  assert.equal(String(pushes[0].user), IDS.tech);
+  assert.equal(pushes[0].data.event, 'assigned');
+  assert.equal(pushes[0].data.bookingId, IDS.booking);
+  assert.ok(pushes[0].data.titleAr && pushes[0].data.messageAr, 'EN + AR text');
+  assert.equal(db.assignedBy, 'admin');
+  assert.ok(db.assignedAt instanceof Date);
+});
+
+test('assign from pending records the confirmation too; reassigning tells the previous technician', async () => {
+  db = makeBooking({ status: 'pending' });
+  const ok = await call('PUT', `/${IDS.booking}/assign`, IDS.admin, { technicianId: IDS.tech });
+  assert.equal(ok.status, 200);
+  assert.equal(db.status, 'assigned');
+  assert.deepEqual(db.statusHistory.map((h) => h.status), ['confirmed', 'assigned']);
+  assert.ok(db.statusHistory.every((h) => h.actorRole === 'admin'));
+
+  // Hand the not-started job to another technician: the old one gets a 'reassigned' push.
+  const OTHER_TECH = '507f1f77bcf86cd799439017';
+  accounts[OTHER_TECH] = { _id: OTHER_TECH, role: 'technician', isVerified: true, fullName: 'Tech Two' };
+  const realFindOne = Technician.findOne;
+  Technician.findOne = async (filter) => ({ user: filter.user, active: true, availability: true });
+  try {
+    await new Promise((r) => setTimeout(r, 30));
+    notifications = [];
+    const re = await call('PUT', `/${IDS.booking}/assign`, IDS.admin, { technicianId: OTHER_TECH });
+    assert.equal(re.status, 200);
+    assert.equal(String(db.technician), OTHER_TECH);
+    await new Promise((r) => setTimeout(r, 30));
+    const pushes = notifications.filter((n) => n.data?.kind === 'job');
+    assert.deepEqual(pushes.map((n) => `${n.user}:${n.data.event}`).sort(), [`${IDS.tech}:reassigned`, `${OTHER_TECH}:assigned`].sort());
+  } finally {
+    Technician.findOne = realFindOne;
+    delete accounts[OTHER_TECH];
+  }
+  db.status = 'on_the_way';
+  assert.equal((await call('PUT', `/${IDS.booking}/assign`, IDS.admin, { technicianId: IDS.tech })).status, 400, 'started jobs cannot be reassigned');
 });
 
 test('reschedule: date must be today..+60 days (Riyadh) and the time a real slot; who moved it is recorded', async () => {
@@ -488,12 +535,18 @@ test('reschedule: date must be today..+60 days (Riyadh) and the time a real slot
   assert.equal(db.rescheduledBy, 'admin');
   assert.match(byAdmin.json.message, /customer has been notified/);
   await new Promise((r) => setTimeout(r, 30));
-  const note = notifications.at(-1);
+  const note = notifications.find((n) => n.data?.event === 'rescheduled_admin');
   assert.match(note.message, /Our team moved your booking/);
+  const techPush = notifications.find((n) => n.data?.kind === 'job');
+  assert.equal(techPush.data.event, 'rescheduled', 'the assigned technician is told too');
+  assert.equal(String(techPush.user), IDS.tech);
   assert.match(note.data.messageAr, /قام فريقنا/);
 
+  // Customers may move an assigned job until the technician is on the way, but not after that
   db = makeBooking({ status: 'assigned' });
-  assert.equal((await call('PUT', `/${IDS.booking}/reschedule`, IDS.customer, { date: day(6) })).status, 400, 'customers cannot move an assigned job');
+  assert.equal((await call('PUT', `/${IDS.booking}/reschedule`, IDS.customer, { date: day(6) })).status, 200, 'customers can move an assigned job');
+  db = makeBooking({ status: 'on_the_way' });
+  assert.equal((await call('PUT', `/${IDS.booking}/reschedule`, IDS.customer, { date: day(6) })).status, 400, 'customers cannot move a job once the technician is on the way');
 });
 
 test('booking create: time is normalised, and the duplicate check matches legacy spellings and legacy service ids', async () => {
@@ -538,4 +591,142 @@ test('report-issue sends a bilingual notification', async () => {
   assert.equal(note.data.titleAr, 'العنوان غير صحيح');
   assert.match(note.data.messageAr, /عنوانك/);
   assert.ok(note.expiresAt instanceof Date && note.expiresAt > new Date(Date.now() + 89 * 86400000));
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Technicians: auto-assign on create, one active job at a time, completion + commission (TECH-CONTRACT).
+// ---------------------------------------------------------------------------------------------------------------
+test('booking create: an auto-assigned booking is returned as assigned and the technician gets a job push', async () => {
+  autoAssignResult = (booking) => ({
+    booking: { ...booking, status: 'assigned', technician: IDS.tech, assignedBy: 'auto', assignedAt: new Date() },
+    technician: { _id: IDS.tech, fullName: 'Tech' },
+  });
+  const res = await call('POST', '/public', IDS.customer, goodBooking);
+  assert.equal(res.status, 201);
+  assert.equal(res.json.data.booking.status, 'assigned');
+  assert.equal(res.json.data.booking.assignedBy, 'auto');
+  await new Promise((r) => setTimeout(r, 30));
+  const push = notifications.find((n) => n.data?.kind === 'job');
+  assert.equal(String(push.user), IDS.tech);
+  assert.equal(push.data.event, 'assigned');
+  assert.match(push.message, /^New job: AC Service · .+ · Jeddah/);
+  assert.ok(notifications.some((n) => n.data?.event === 'assigned' && String(n.user) === IDS.customer), 'customer told a technician was assigned');
+
+  // Nobody matched: the booking stays pending and the request still succeeds.
+  autoAssignResult = null;
+  notifications = [];
+  const pending = await call('POST', '/public', IDS.customer, { ...goodBooking, time: '11:00 AM' });
+  assert.equal(pending.status, 201);
+  assert.equal(pending.json.data.booking.status, 'pending');
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(!notifications.some((n) => n.data?.kind === 'job'));
+});
+
+test('one active job: a technician cannot start a second job while one is on the way / in progress (409)', async () => {
+  let busyQuery;
+  Booking.findOne = async (filter) => {
+    busyQuery = filter;
+    return String(filter.technician) === IDS.tech && filter.status?.$in?.includes('in_progress') ? { _id: '507f1f77bcf86cd799439099' } : null;
+  };
+  for (const to of ['on_the_way']) {
+    db = makeBooking({ status: 'assigned', technician: IDS.tech });
+    const res = await call('PUT', `/${IDS.booking}/status`, IDS.tech, { status: to });
+    assert.equal(res.status, 409, `assigned -> ${to}`);
+    assert.equal(res.json.message, 'Finish your current job first');
+    assert.equal(res.json.activeJobId, '507f1f77bcf86cd799439099');
+    assert.equal(db.status, 'assigned', 'nothing changed');
+  }
+  assert.deepEqual(busyQuery._id, { $ne: IDS.booking }, 'the job itself does not count');
+  assert.deepEqual(busyQuery.status, { $in: ['on_the_way', 'in_progress'] });
+  assert.equal(busyQuery.deletedAt, null);
+
+  // An admin is not limited by the rule.
+  db = makeBooking({ status: 'assigned', technician: IDS.tech });
+  assert.equal((await call('PUT', `/${IDS.booking}/status`, IDS.admin, { status: 'in_progress' })).status, 200);
+
+  // Moving the current job forward is always allowed.
+  db = makeBooking({ status: 'on_the_way', technician: IDS.tech });
+  assert.equal((await call('PUT', `/${IDS.booking}/status`, IDS.tech, { status: 'in_progress' })).status, 200);
+  db = makeBooking({ status: 'in_progress', technician: IDS.tech, totalAmount: 100 });
+  assert.equal((await call('PUT', `/${IDS.booking}/status`, IDS.tech, { status: 'completed' })).status, 200);
+
+  // Once the other job is done the technician can start the next one.
+  Booking.findOne = async () => null;
+  db = makeBooking({ status: 'assigned', technician: IDS.tech });
+  assert.equal((await call('PUT', `/${IDS.booking}/status`, IDS.tech, { status: 'on_the_way' })).status, 200);
+});
+
+test('completion: 7% commission of the amount collected, default = booking total, rounded to 2 decimals', async () => {
+  const complete = async (body, over = {}, who = IDS.tech) => {
+    db = makeBooking({ status: 'in_progress', technician: IDS.tech, totalAmount: 180, ...over });
+    return call('PUT', `/${IDS.booking}/status`, who, { status: 'completed', ...body });
+  };
+  let res = await complete({ amountCollected: 250, note: 'Gas refill' });
+  assert.equal(res.status, 200);
+  assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 250, amount: 17.5, technicianShare: 232.5 });
+  assert.equal(db.completion.amountCollected, 250);
+  assert.equal(db.completion.note, 'Gas refill');
+  assert.equal(db.completion.completedByRole, 'technician');
+  assert.equal(String(db.completion.completedBy), IDS.tech);
+  assert.ok(db.completion.completedAt instanceof Date);
+
+  res = await complete({});
+  assert.equal(res.status, 200);
+  assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 180, amount: 12.6, technicianShare: 167.4 }, 'default = totalAmount');
+
+  await complete({ amountCollected: 99.99 });
+  assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 99.99, amount: 7, technicianShare: 92.99 }, 'rounded');
+  await complete({ amountCollected: 33.33 });
+  assert.equal(db.commission.amount, 2.33);
+  assert.equal(db.commission.technicianShare, 31);
+  await complete({ amountCollected: '١٥٠' });
+  assert.equal(db.commission.base, 150, 'Arabic-Indic digits');
+  await complete({ amountCollected: 0 });
+  assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 0, amount: 0, technicianShare: 0 });
+
+  for (const bad of [-1, 100001, 'abc', '12abc', true]) {
+    res = await complete({ amountCollected: bad });
+    assert.equal(res.status, 400, JSON.stringify(bad));
+    assert.equal(db.status, 'in_progress');
+  }
+
+  // An admin completing uses the booking total.
+  await complete({ amountCollected: 999 }, {}, IDS.admin);
+  assert.equal(db.completion.amountCollected, 180);
+  assert.equal(db.completion.completedByRole, 'admin');
+  assert.equal(db.commission.amount, 12.6);
+
+  // No technician on the booking: completion is recorded, no commission.
+  await complete({}, { technician: undefined }, IDS.admin);
+  assert.equal(db.status, 'completed');
+  assert.equal(db.commission, undefined);
+});
+
+test('completion: the commission rate is read at completion time and frozen on the booking', async () => {
+  settingDoc = { key: 'app', commissionRate: 0.1 };
+  db = makeBooking({ status: 'in_progress', technician: IDS.tech, totalAmount: 200 });
+  assert.equal((await call('PUT', `/${IDS.booking}/status`, IDS.tech, { status: 'completed' })).status, 200);
+  const first = db;
+  assert.deepEqual({ ...first.commission }, { rate: 0.1, base: 200, amount: 20, technicianShare: 180 });
+
+  settingDoc = { key: 'app', commissionRate: 0.05 }; // the admin changes the rate afterwards
+  db = makeBooking({ status: 'in_progress', technician: IDS.tech, totalAmount: 200 });
+  await call('PUT', `/${IDS.booking}/status`, IDS.tech, { status: 'completed' });
+  assert.equal(db.commission.rate, 0.05);
+  assert.equal(db.commission.amount, 10);
+  assert.equal(first.commission.rate, 0.1, 'the earlier booking keeps its rate');
+
+  settingDoc = { key: 'app', commissionRate: 7 }; // corrupt value -> default 7%
+  db = makeBooking({ status: 'in_progress', technician: IDS.tech, totalAmount: 100 });
+  await call('PUT', `/${IDS.booking}/status`, IDS.tech, { status: 'completed' });
+  assert.equal(db.commission.rate, 0.07);
+});
+
+test('admin cancel of an assigned booking pushes the technician', async () => {
+  db = makeBooking({ status: 'assigned', technician: IDS.tech });
+  assert.equal((await call('PUT', `/${IDS.booking}/status`, IDS.admin, { status: 'cancelled', reason: 'Customer away' })).status, 200);
+  await new Promise((r) => setTimeout(r, 30));
+  const push = notifications.find((n) => n.data?.kind === 'job');
+  assert.equal(push.data.event, 'cancelled');
+  assert.equal(String(push.user), IDS.tech);
 });

@@ -57,3 +57,6 @@ backend/
 frontend/
 scratch_*.js
 
+
+# Local database backups (contain customer data)
+backups/

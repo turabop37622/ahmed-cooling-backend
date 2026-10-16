@@ -7,13 +7,25 @@ const technicianSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  // Specialties (API name: "specialties"). Values match Service.category; 'freezer'/'electronics' are legacy values
+  // kept valid for old profiles. Empty = all services.
   skills: [{
     type: String,
-    enum: ['ac', 'refrigerator', 'washing-machine', 'stove', 'freezer', 'electronics']
+    enum: ['ac', 'refrigerator', 'washing-machine', 'stove', 'general', 'freezer', 'electronics']
   }],
+  // Cities the technician covers ('jeddah' | 'makkah'). Empty = any city (and bookings whose city is unknown).
+  cities: [{
+    type: String,
+    enum: ['jeddah', 'makkah']
+  }],
+  // Gets new bookings automatically (utils/autoAssign.js) while also active and available.
+  autoAssign: {
+    type: Boolean,
+    default: false
+  },
   experience: {
     type: String,
-    required: true
+    default: ''
   },
   certifications: [{
     name: String,

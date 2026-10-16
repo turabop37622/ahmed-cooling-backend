@@ -286,11 +286,33 @@ test('Google sign-in still refuses to merge into a verified password account', a
 });
 
 test('only Saudi phone numbers are accepted at sign-up', async () => {
-  for (const phone of ['+923001234567', '+97455123456', '+15551234567', '0512345678', '+966412345678', '+96651234567']) {
+  for (const phone of ['+923001234567', '+97455123456', '+15551234567', '0412345678', '+966412345678', '+96651234567', '051234567']) {
     const res = await post('/register', { ...signupBody, phone });
     assert.equal(res.status, 400, phone);
   }
   const ok = await post('/register', { ...signupBody, phone: '+966 51 234 5678' });
   assert.equal(ok.status, 201);
   assert.equal(FakeUser.store[0].phone, '+966512345678');
+  // The local format 05XXXXXXXX is accepted and stored in the canonical form.
+  FakeUser.store = [];
+  const fresh = await post('/register', { ...signupBody, phone: '0512345678' });
+  assert.equal(fresh.status, 201);
+  assert.equal(FakeUser.store[0].phone, '+966512345678');
+});
+
+test('technicians sign in with phone + password (any spelling of the number) and get role technician', async () => {
+  await verifiedUser({ role: 'technician', email: undefined, phone: '+966551234567', authProvider: 'phone', password: 'TechPass123' });
+  for (const spelling of ['+966551234567', '0551234567', '966551234567', '551234567', '+966 55 123 4567']) {
+    const login = await post('/phone/login', { phone: spelling, password: 'TechPass123' });
+    assert.equal(login.status, 200, spelling);
+    assert.equal(login.body.user.role, 'technician');
+    assert.ok(login.body.token);
+  }
+  assert.equal((await post('/phone/login', { phone: '0551234567', password: 'wrong-pass' })).status, 401);
+});
+
+test('an account stored with a local-format number is still found by the canonical number', async () => {
+  await verifiedUser({ phone: '0566666666', authProvider: 'phone', password: 'LocalPass123', email: 'local@example.com' });
+  const login = await post('/phone/login', { phone: '+966566666666', password: 'LocalPass123' });
+  assert.equal(login.status, 200);
 });

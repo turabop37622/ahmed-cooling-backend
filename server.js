@@ -1482,6 +1482,8 @@ async function startServer() {
     app.use('/api/admin', adminRoutes);
     app.use('/api/users', require('./routes/users'));
     app.use('/api/notifications', require('./routes/notifications'));
+    // Technician app (technician accounts only)
+    app.use('/api/technician', require('./routes/technician'));
     app.use('/api', require('./routes/feedback'));
     console.log('✅ Admin routes loaded');
 

@@ -6,7 +6,10 @@ const Booking = require('../models/Booking');
 const Service = require('../models/Service');
 const User = require('../models/User');
 const Technician = require('../models/Technician');
-const { notifyUser } = require('../utils/notify');
+const { notifyUser, notifyTechnicianJob } = require('../utils/notify');
+// Used through the module object so tests can replace it.
+const autoAssign = require('../utils/autoAssign');
+const { getCommissionRate, computeCommission, parseAmountCollected } = require('../utils/commission');
 // Shared with the website. Regular services are priced from the DATABASE (the source of truth); this file only adds
 // the fixed-price packages (pkg_*, technician visit fee included) and maps the old numeric ids '1'...'9' to the
 // database service that replaced them.
@@ -18,7 +21,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { escapeHtml, escapeFields, cleanStr, isValidTime } = require('../utils/security');
-const { validatePhone, phoneVariants, countryFromPhone } = require('../utils/phone');
+const { validatePhone, phoneVariants, countryFromPhone, normalizePhone } = require('../utils/phone');
 const { MAX_DAYS_AHEAD, isBookableDate, normalizeTime, timeMatcher, riyadhCompactDate } = require('../utils/schedule');
 
 // Audit trail of admin/staff changes (models/AuditLog.js). Optional: without the model nothing is recorded.
@@ -701,9 +704,11 @@ const notFound = (res) => res.status(404).json({ success: false, message: 'Booki
 const actorRoleOf = (user) => (['admin', 'technician'].includes(user.role) ? user.role : 'customer');
 
 // One implementation for both cancel routes.
+// A customer can still cancel or reschedule once a technician is assigned, until the technician is on the way;
+// the technician gets a push either way.
 const cancelForOwner = async (req, res, booking) => {
   if (!ownsBooking(booking, req.user)) return res.status(403).json({ success: false, message: 'Access denied' });
-  if (!['pending', 'confirmed'].includes(booking.status)) {
+  if (!['pending', 'confirmed', 'assigned'].includes(booking.status)) {
     return res.status(400).json({ success: false, message: `Cannot cancel in ${booking.status} status` });
   }
   const role = actorRoleOf(req.user);
@@ -734,11 +739,12 @@ const cancelForOwner = async (req, res, booking) => {
     });
   }
   notifyBooking(updated, 'cancelled');
+  if (updated.technician) notifyTechnicianJob(updated.technician, updated, 'cancelled').catch(() => {});
   return res.json({ success: true, message: 'Booking cancelled', data: { bookingId, status: updated.status }, booking: updated });
 };
 
 // One implementation for both reschedule routes (customer on their own booking, or an admin).
-const RESCHEDULABLE = { customer: ['pending', 'confirmed'], admin: ['pending', 'confirmed', 'assigned'] };
+const RESCHEDULABLE = { customer: ['pending', 'confirmed', 'assigned'], admin: ['pending', 'confirmed', 'assigned'] };
 const rescheduleForOwner = async (req, res, booking) => {
   if (!ownsBooking(booking, req.user)) return res.status(403).json({ success: false, message: 'Access denied' });
   const by = req.user.role === 'admin' ? 'admin' : 'customer';
@@ -769,6 +775,7 @@ const rescheduleForOwner = async (req, res, booking) => {
   booking.statusHistory.push({ status: booking.status, timestamp: now, note: `Rescheduled by ${by} from ${booking.previousSchedule.date || 'no date'} ${booking.previousSchedule.time || ''}`.trim(), actorRole: by, actor: req.user.id });
   await booking.save();
   notifyBooking(booking, by === 'admin' ? 'rescheduled_admin' : 'rescheduled');
+  if (booking.technician) notifyTechnicianJob(booking.technician, booking, 'rescheduled').catch(() => {});
   if (by === 'admin') {
     audit({ actor: req.user.id, action: 'booking.reschedule', target: { kind: 'booking', id: String(booking._id), label: booking.orderNumber }, before: booking.previousSchedule, after: { date, time } });
   }
@@ -886,7 +893,8 @@ router.post('/public', auth, createLimiter, [
     if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array(), message: errors.array()[0].msg });
 
     const customerName = cleanStr(req.body.customerName, 100);
-    const phone = cleanStr(req.body.phone, 30);
+    // Stored in the canonical +9665XXXXXXXX form (05..., 9665..., Arabic digits are accepted on input).
+    const phone = normalizePhone(cleanStr(req.body.phone, 30));
     const address = cleanStr(req.body.address, 300);
     const comments = cleanStr(req.body.comments, 1000);
     const date = cleanStr(req.body.date, 10);
@@ -989,7 +997,20 @@ router.post('/public', auth, createLimiter, [
     sendAdminNotificationEmail({ ...emailData, emailNonce: emailActionNonce });
     notifyBooking(booking, 'received');
 
-    res.status(201).json(createdResponse(booking));
+    // Automatic technician assignment (utils/autoAssign.js). Never fails the request: nobody matching, or any error,
+    // leaves the booking pending for the admin.
+    const auto = await autoAssign.autoAssignBooking(booking);
+    if (auto && auto.booking) {
+      notifyBooking(auto.booking, 'assigned');
+      notifyTechnicianJob(auto.booking.technician, auto.booking, 'assigned').catch(() => {});
+      audit({
+        action: 'booking.auto_assign',
+        target: { kind: 'booking', id: String(auto.booking._id), label: auto.booking.orderNumber },
+        before: { status: 'pending' }, after: { status: 'assigned', technician: String(auto.booking.technician) },
+      });
+    }
+
+    res.status(201).json(createdResponse(auto && auto.booking ? auto.booking : booking));
   } catch (error) {
     // Two simultaneous requests with the same key: the loser gets the winner's booking.
     if (error?.code === 11000 && req.get('Idempotency-Key')) {
@@ -1150,6 +1171,9 @@ const TECHNICIAN_TRANSITIONS = {
   in_progress: ['completed'],
 };
 const TRANSITIONS = { admin: ADMIN_TRANSITIONS, technician: TECHNICIAN_TRANSITIONS };
+// A technician holds many assigned jobs but works on one at a time.
+const WORKING_ON = ['on_the_way', 'in_progress'];
+const BUSY_MESSAGE = 'Finish your current job first';
 
 router.put('/:id/status', auth, async (req, res) => {
   try {
@@ -1181,9 +1205,31 @@ router.put('/:id/status', auth, async (req, res) => {
     if (!TRANSITIONS[role][from]?.includes(status)) {
       return res.status(400).json({ success: false, message: `Cannot change a ${from} booking to ${status}`, currentStatus: from });
     }
+    // One active job per technician: no second booking on the way / in progress.
+    if (role === 'technician' && WORKING_ON.includes(status) && !WORKING_ON.includes(from)) {
+      const busy = await Booking.findOne(
+        { technician: req.user.id, status: { $in: WORKING_ON }, _id: { $ne: booking._id }, ...NOT_DELETED },
+        { _id: 1, orderNumber: 1 }
+      );
+      if (busy) return res.status(409).json({ success: false, message: BUSY_MESSAGE, activeJobId: String(busy._id), currentStatus: from });
+    }
 
     const now = new Date();
     const $set = { status };
+    if (status === 'completed') {
+      // Amount collected: technician may enter it (default = booking total); an admin completion uses the total.
+      const parsed = role === 'technician' ? parseAmountCollected(req.body.amountCollected, booking.totalAmount) : parseAmountCollected(undefined, booking.totalAmount);
+      if (parsed.error) return res.status(400).json({ success: false, message: parsed.error });
+      $set.completion = {
+        amountCollected: parsed.value,
+        note: cleanStr(req.body.note, 500),
+        completedAt: now,
+        completedBy: req.user.id,
+        completedByRole: role,
+      };
+      // Commission only when a technician did the job; the current rate is frozen on the booking.
+      if (booking.technician) $set.commission = computeCommission(parsed.value, await getCommissionRate());
+    }
     let note = notes || `Updated by ${role}`;
     if (status === 'cancelled') {
       $set.cancellationReason = reason || 'Cancelled by admin';
@@ -1218,6 +1264,9 @@ router.put('/:id/status', auth, async (req, res) => {
         address: updated.address, totalAmount: updated.totalAmount, currency: updated.currency,
       });
     }
+    if (status === 'cancelled' && updated.technician) {
+      notifyTechnicianJob(updated.technician, updated, 'cancelled').catch(() => {});
+    }
     if (status === 'cancelled' && updated.email) {
       sendCustomerCancellationEmail(updated.email, {
         bookingId: updated.bookingId || updated._id.toString(), customerName: updated.customerName,
@@ -1230,7 +1279,13 @@ router.put('/:id/status', auth, async (req, res) => {
     audit({
       actor: req.user.id, action: 'booking.status',
       target: { kind: 'booking', id: String(updated._id), label: updated.orderNumber },
-      before: { status: from }, after: { status, ...(status === 'cancelled' ? { reason: updated.cancellationReason } : {}), by: role },
+      before: { status: from },
+      after: {
+        status, by: role,
+        ...(status === 'cancelled' ? { reason: updated.cancellationReason } : {}),
+        ...(status === 'completed' && updated.completion ? { amountCollected: updated.completion.amountCollected } : {}),
+        ...(status === 'completed' && updated.commission && updated.commission.rate !== undefined ? { commissionRate: updated.commission.rate, commission: updated.commission.amount } : {}),
+      },
     });
 
     res.json({ success: true, message: `Status updated to ${status}`, booking: updated });
@@ -1240,8 +1295,9 @@ router.put('/:id/status', auth, async (req, res) => {
   }
 });
 
-// Admin picks the technician for a booking (this is the only way a booking becomes "assigned").
-// From confirmed, or from assigned to hand the job to a different technician.
+// Admin picks the technician for a booking (besides auto-assign, the only way a booking becomes "assigned").
+// From pending (also records the confirmation) or confirmed, or from assigned to hand a not-started job to a
+// different technician.
 router.put('/:id/assign', auth, async (req, res) => {
   try {
     if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only' });
@@ -1259,8 +1315,7 @@ router.put('/:id/assign', auth, async (req, res) => {
     if (from === 'assigned' && String(booking.technician || '') === technicianId) {
       return res.status(409).json({ success: false, message: 'This technician is already assigned', currentStatus: from });
     }
-    if (from === 'pending') return res.status(400).json({ success: false, message: 'Confirm the booking before assigning a technician' });
-    if (!['confirmed', 'assigned'].includes(from)) {
+    if (!['pending', 'confirmed', 'assigned'].includes(from)) {
       return res.status(400).json({ success: false, message: `Cannot assign a technician in ${from} status` });
     }
 
@@ -1274,29 +1329,30 @@ router.put('/:id/assign', auth, async (req, res) => {
     }
     if (profile.availability === false) return res.status(400).json({ success: false, message: 'This technician is not available' });
 
+    const previousTechnician = booking.technician ? String(booking.technician) : null;
     const now = new Date();
+    const history = [{ status: 'assigned', timestamp: now, note: `Assigned to ${technician.fullName}`, actorRole: 'admin', actor: req.user.id }];
+    if (from === 'pending') history.unshift({ status: 'confirmed', timestamp: now, note: 'Confirmed by admin (assigned)', actorRole: 'admin', actor: req.user.id });
     const updated = await Booking.findOneAndUpdate(
       { _id: booking._id, status: from, technician: booking.technician || null, ...NOT_DELETED },
       {
-        $set: { technician: technician._id, status: 'assigned' },
-        $push: { statusHistory: { status: 'assigned', timestamp: now, note: `Assigned to ${technician.fullName}`, actorRole: 'admin', actor: req.user.id } },
+        $set: { technician: technician._id, status: 'assigned', assignedBy: 'admin', assignedAt: now },
+        $push: { statusHistory: { $each: history } },
       },
       { new: true }
     );
     if (!updated) return res.status(409).json({ success: false, message: ALREADY_CHANGED });
 
     notifyBooking(updated, 'assigned');
-    notifyUser(technician._id, {
-      type: 'booking', title: 'New job assigned', titleAr: 'تم تعيين مهمة جديدة لك',
-      message: `You have been assigned booking #${updated.orderNumber}${updated.date ? ` on ${updated.date}` : ''}${updated.time ? ` (${updated.time})` : ''}.`,
-      messageAr: `تم تعيينك للحجز رقم ${updated.orderNumber}${updated.date ? ` بتاريخ ${updated.date}` : ''}${updated.time ? ` (${updated.time})` : ''}.`,
-      data: { bookingId: String(updated._id), orderNumber: updated.orderNumber, status: 'assigned', event: 'assigned_to_you' },
-      priority: 'high',
-    }).catch(() => {});
+    notifyTechnicianJob(technician._id, updated, 'assigned').catch(() => {});
+    // The previous technician (reassignment) is told the job is no longer theirs.
+    if (previousTechnician && previousTechnician !== String(technician._id)) {
+      notifyTechnicianJob(previousTechnician, updated, 'reassigned').catch(() => {});
+    }
     audit({
       actor: req.user.id, action: 'booking.assign',
       target: { kind: 'booking', id: String(updated._id), label: updated.orderNumber },
-      before: { status: from, technician: booking.technician ? String(booking.technician) : null },
+      before: { status: from, technician: previousTechnician },
       after: { status: 'assigned', technician: String(technician._id) },
     });
     res.json({ success: true, message: 'Technician assigned', booking: updated });

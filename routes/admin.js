@@ -4,7 +4,6 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Booking = require('../models/Booking');
 const Service = require('../models/Service');
-const Technician = require('../models/Technician');
 const Inquiry = require('../models/Inquiry');
 const GeneralRating = require('../models/GeneralRating');
 const AuditLog = require('../models/AuditLog');
@@ -17,7 +16,6 @@ const { normEmail, burnPasswordCheck } = require('../utils/security');
 const BOOKING_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'in_progress', 'completed', 'cancelled'];
 const ACTIVE_STATUSES = ['pending', 'confirmed', 'assigned', 'on_the_way', 'in_progress'];
 const NOT_STARTED_STATUSES = ['pending', 'confirmed', 'assigned'];
-const WORKING_STATUSES = ['assigned', 'on_the_way', 'in_progress']; // a technician is busy with these
 const DELETABLE_STATUSES = ['pending', 'cancelled'];
 const ROLES = ['customer', 'technician', 'admin'];
 const PAYMENT_STATUSES = ['pending', 'paid', 'partially_paid'];
@@ -220,6 +218,7 @@ const BOOKING_LIST_PROJECTION = {
   service: 1, serviceDetails: 1, address: 1, city: 1, technician: 1,
   totalAmount: 1, currency: 1, paymentStatus: 1, paymentMethod: 1,
   rescheduledAt: 1, createdAt: 1, updatedAt: 1,
+  assignedBy: 1, assignedAt: 1, completion: 1, commission: 1,
 };
 
 // Filters that need the computed schedule fields: the from/to range and the shared overdue condition.
@@ -250,7 +249,7 @@ const buildBookingsPipeline = (parsed, now) => [
             from: User.collection.name,
             localField: 'technician',
             foreignField: '_id',
-            pipeline: [{ $project: { fullName: 1, phone: 1 } }],
+            pipeline: [{ $project: { fullName: 1, name: '$fullName', phone: 1 } }],
             as: 'technician',
           },
         },
@@ -455,6 +454,7 @@ router.get('/bookings/:id', async (req, res) => {
     if (!booking) return res.status(404).json({ success: false, message: 'Booking not found' });
     delete booking.__v;
     delete booking.idempotencyKey;
+    if (booking.technician && typeof booking.technician === 'object') booking.technician.name = booking.technician.fullName;
     res.json({ success: true, booking });
   } catch (err) {
     serverError(res);
@@ -529,43 +529,9 @@ router.delete('/bookings/:id', async (req, res) => {
 });
 
 // ============================================
-// TECHNICIANS (for the assign picker)
+// TECHNICIANS + SETTINGS (routes/adminTechnicians.js; admin-only through the router.use(adminAuth) above)
 // ============================================
-router.get('/technicians', async (req, res) => {
-  try {
-    const users = await User.find({ role: 'technician' }).select('fullName phone email isVerified').sort({ fullName: 1 }).lean();
-    const ids = users.map((u) => u._id);
-    const [profiles, jobs] = await Promise.all([
-      Technician.find({ user: { $in: ids } }).select('user skills availability active rating completedJobs').lean(),
-      Booking.aggregate([
-        { $match: { technician: { $in: ids }, status: { $in: WORKING_STATUSES }, ...NOT_DELETED } },
-        { $group: { _id: '$technician', n: { $sum: 1 } } },
-      ]),
-    ]);
-    const profileOf = new Map(profiles.map((p) => [String(p.user), p]));
-    const jobsOf = new Map(jobs.map((j) => [String(j._id), j.n]));
-    const technicians = users.map((u) => {
-      const p = profileOf.get(String(u._id));
-      return {
-        _id: u._id,
-        name: u.fullName,
-        phone: u.phone || null,
-        email: u.email || null,
-        specialties: p?.skills || [],
-        // No technician profile means the account was never set up for jobs: shown, but not assignable.
-        availability: !!p && p.availability !== false,
-        active: !!p && p.active !== false && u.isVerified !== false,
-        hasProfile: !!p,
-        rating: p?.rating ?? null,
-        completedJobs: p?.completedJobs ?? 0,
-        activeJobs: jobsOf.get(String(u._id)) || 0,
-      };
-    });
-    res.json({ success: true, technicians });
-  } catch (err) {
-    serverError(res);
-  }
-});
+router.use(require('./adminTechnicians'));
 
 // ============================================
 // USERS

@@ -4,20 +4,24 @@ const User = require('../models/User');
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 const EXPO_URL = 'https://exp.host/--/api/v2/push/send';
 
-let fcmApp; // undefined = not tried, null = unavailable
+// FCM (firebase-admin) is used only when FIREBASE_SERVICE_ACCOUNT holds the service-account JSON, raw or base64.
+// Without it FCM tokens are skipped silently (Expo tokens keep working).
+let fcmMessaging; // undefined = not tried, null = unavailable
 const getFcm = () => {
-  if (fcmApp !== undefined) return fcmApp;
-  fcmApp = null;
+  if (fcmMessaging !== undefined) return fcmMessaging;
+  fcmMessaging = null;
   try {
-    const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-    if (!raw) { console.log('[notify] FCM skipped: FIREBASE_SERVICE_ACCOUNT not set'); return fcmApp; }
-    const admin = require('firebase-admin');
-    const json = raw.trim().startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8');
-    fcmApp = admin.initializeApp({ credential: admin.credential.cert(JSON.parse(json)) }, 'notify');
+    const raw = (process.env.FIREBASE_SERVICE_ACCOUNT || '').trim();
+    if (!raw) { console.log('[notify] FCM skipped: FIREBASE_SERVICE_ACCOUNT not set'); return fcmMessaging; }
+    const { initializeApp, getApps, cert } = require('firebase-admin/app');
+    const { getMessaging } = require('firebase-admin/messaging');
+    const json = raw.startsWith('{') ? raw : Buffer.from(raw, 'base64').toString('utf8');
+    const app = getApps().find((a) => a.name === 'notify') || initializeApp({ credential: cert(JSON.parse(json)) }, 'notify');
+    fcmMessaging = getMessaging(app);
   } catch (e) {
     console.log('[notify] FCM skipped:', e.code === 'MODULE_NOT_FOUND' ? 'firebase-admin not installed' : e.message);
   }
-  return fcmApp;
+  return fcmMessaging;
 };
 
 const pruneTokens = async (userId, tokens) => {
@@ -28,7 +32,8 @@ const pruneTokens = async (userId, tokens) => {
 
 const sendExpo = async (userId, tokens, payload) => {
   const messages = tokens.map((to) => ({
-    to, sound: 'default', title: payload.title, body: payload.message, data: payload.data, priority: payload.priority === 'high' ? 'high' : 'default'
+    to, sound: 'default', title: payload.title, body: payload.message, data: payload.data, priority: payload.priority === 'high' ? 'high' : 'default',
+    ...(payload.channelId ? { channelId: payload.channelId } : {})
   }));
   const res = await fetch(EXPO_URL, {
     method: 'POST',
@@ -44,13 +49,16 @@ const sendExpo = async (userId, tokens, payload) => {
 };
 
 const sendFcm = async (userId, tokens, payload) => {
-  const app = getFcm();
-  if (!app) return;
+  const messaging = getFcm();
+  if (!messaging) return;
   const data = {};
-  Object.entries(payload.data || {}).forEach(([k, v]) => { data[k] = String(v); });
-  const r = await app.messaging().sendEachForMulticast({
+  Object.entries(payload.data || {}).forEach(([k, v]) => { if (v !== undefined && v !== null) data[k] = String(v); });
+  const r = await messaging.sendEachForMulticast({
     tokens, notification: { title: payload.title, body: payload.message }, data,
-    android: { priority: payload.priority === 'high' ? 'high' : 'normal' }
+    android: {
+      priority: payload.priority === 'high' ? 'high' : 'normal',
+      ...(payload.channelId ? { notification: { channelId: payload.channelId, sound: 'default' } } : {})
+    }
   });
   const bad = [];
   r.responses.forEach((x, i) => {
@@ -76,7 +84,7 @@ const sendPush = async (userId, payload) => {
  * Save an in-app notification and best-effort push it. Never throws.
  * Returns the saved Notification doc (or null).
  */
-const notifyUser = async (userId, { type = 'booking', title, message, titleAr, messageAr, data = {}, priority = 'medium' } = {}) => {
+const notifyUser = async (userId, { type = 'booking', title, message, titleAr, messageAr, data = {}, priority = 'medium', channelId } = {}) => {
   try {
     if (!userId || !title || !message) return null;
     const payloadData = { ...data };
@@ -88,7 +96,7 @@ const notifyUser = async (userId, { type = 'booking', title, message, titleAr, m
     }).save();
     const pushData = { ...payloadData, notificationId: String(doc._id) };
     // Fire and forget: push must never delay or break the request.
-    sendPush(userId, { title, message, data: pushData, priority }).catch((e) => console.log('[notify] push error:', e.message));
+    sendPush(userId, { title, message, data: pushData, priority, channelId }).catch((e) => console.log('[notify] push error:', e.message));
     return doc;
   } catch (e) {
     console.log('[notify] failed:', e.message);
@@ -96,4 +104,53 @@ const notifyUser = async (userId, { type = 'booking', title, message, titleAr, m
   }
 };
 
-module.exports = { notifyUser };
+// ── Technician job pushes (mobile app, Android channel 'bookings') ──
+// data: { kind: 'job', bookingId, event: 'assigned' | 'reassigned' | 'cancelled' | 'rescheduled', orderNumber }
+// 'reassigned' = the job was taken away from this technician (given to someone else or unassigned).
+const jobServiceNames = (booking) => {
+  const svc = booking.service && typeof booking.service === 'object' ? booking.service : {};
+  const en = svc.name || booking.serviceDetails?.name || 'Service';
+  return { en, ar: svc.name_ar || svc.nameAr || en };
+};
+const jobArea = (booking) => {
+  const city = String(booking.city || '').trim();
+  if (city) return city.slice(0, 40);
+  const first = String(booking.address || '').split(',')[0].trim();
+  return first.slice(0, 40);
+};
+const JOB_TEXT = {
+  assigned: (b, s, when, area) => ({
+    title: 'New job', titleAr: 'مهمة جديدة',
+    message: ['New job: ' + s.en, when.en, area].filter(Boolean).join(' · '),
+    messageAr: ['مهمة جديدة: ' + s.ar, when.ar, area].filter(Boolean).join(' · '),
+  }),
+  reassigned: (b) => ({
+    title: 'Job removed', titleAr: 'تم سحب المهمة',
+    message: `Booking #${b.orderNumber} is no longer assigned to you.`,
+    messageAr: `الحجز رقم ${b.orderNumber} لم يعد مسنداً إليك.`,
+  }),
+  cancelled: (b, s, when) => ({
+    title: 'Job cancelled', titleAr: 'تم إلغاء المهمة',
+    message: `Booking #${b.orderNumber} (${s.en}${when.en ? ', ' + when.en : ''}) was cancelled.`,
+    messageAr: `تم إلغاء الحجز رقم ${b.orderNumber} (${s.ar}${when.ar ? '، ' + when.ar : ''}).`,
+  }),
+  rescheduled: (b, s, when) => ({
+    title: 'Job rescheduled', titleAr: 'تم تغيير موعد المهمة',
+    message: `Booking #${b.orderNumber} (${s.en}) is now on ${when.en || 'a new date'}.`,
+    messageAr: `الحجز رقم ${b.orderNumber} (${s.ar}) أصبح بتاريخ ${when.ar || 'موعد جديد'}.`,
+  }),
+};
+const notifyTechnicianJob = (technicianId, booking, event) => {
+  const make = JOB_TEXT[event];
+  if (!technicianId || !booking || !make) return Promise.resolve(null);
+  const when = booking.date
+    ? { en: booking.date + (booking.time ? ' ' + booking.time : ''), ar: booking.date + (booking.time ? ' ' + booking.time : '') }
+    : { en: 'Flexible', ar: 'موعد مرن' };
+  const text = make(booking, jobServiceNames(booking), when, jobArea(booking));
+  return notifyUser(technicianId, {
+    type: 'booking', ...text, priority: 'high', channelId: 'bookings',
+    data: { kind: 'job', bookingId: String(booking._id), event, orderNumber: booking.orderNumber, status: booking.status },
+  });
+};
+
+module.exports = { notifyUser, notifyTechnicianJob };

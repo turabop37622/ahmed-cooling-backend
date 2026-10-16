@@ -49,7 +49,26 @@
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
       },
-      
+      // How / when the current technician was assigned ('auto' = utils/autoAssign.js when the booking is created).
+      assignedBy: { type: String, enum: ['auto', 'admin'] },
+      assignedAt: { type: Date },
+      // Filled when the booking becomes completed (PUT /api/bookings/:id/status).
+      completion: {
+        amountCollected: Number,
+        note: String,
+        completedAt: Date,
+        completedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        completedByRole: String
+      },
+      // Company commission on the amount collected (bookings with a technician only). The rate is frozen at completion
+      // time; amounts are SAR rounded to 2 decimals. technicianShare = base - amount.
+      commission: {
+        rate: Number,
+        amount: Number,
+        technicianShare: Number,
+        base: Number
+      },
+
       // ============================================
       // CUSTOMER INFO (for public bookings)
       // ============================================
@@ -296,6 +315,8 @@
     // Reviews (public + admin), newest first
     bookingSchema.index({ 'customerFeedback.approved': 1, 'customerFeedback.date': -1 });
     bookingSchema.index({ deletedAt: 1 });
+    // Technician job lists, open-job counts (auto-assign) and commission balances
+    bookingSchema.index({ technician: 1, status: 1, date: 1 });
     // Unique per user, but only for bookings that carry a key (a plain sparse index would still index every booking via "user").
     bookingSchema.index({ user: 1, idempotencyKey: 1 }, { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } });
 
