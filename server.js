@@ -1495,6 +1495,7 @@ async function startServer() {
     // ============================================
     const adminRoutes = require('./routes/admin');
     app.use('/api/admin', adminRoutes);
+    app.use('/api/admin/whatsapp', require('./routes/adminWhatsapp'));
     app.use('/api/users', require('./routes/users'));
     app.use('/api/notifications', require('./routes/notifications'));
     // Technician app (technician accounts only)
@@ -1503,7 +1504,7 @@ async function startServer() {
     console.log('✅ Admin routes loaded');
 
     // ============================================
-    // WHATSAPP BOOKING-CONFIRMATION BOT
+    // WHATSAPP BOT (booking confirmation + general FAQ/handoff) — see routes/whatsappWebhook.js
     // ============================================
     app.use('/api/whatsapp', require('./routes/whatsappWebhook'));
     require('./utils/whatsappBookingBot').startScheduler();

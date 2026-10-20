@@ -1,284 +1,362 @@
-// Admin API Client for Ahmed Cooling Workshop
+// Admin API client for Ahmed Cooling Workshop.
+//
+// Every function returns `response.data`. On failure it throws AdminApiError with:
+//   .status  HTTP status (0 = network error / timeout)
+//   .message the server's message (or a readable fallback)
+//   .errors  the server's field errors array, if any
+// There are no fallback retries to other routes: one call = one request.
+//
+// A 401 from any call except login/changePassword runs the handler AdminAuthContext registers with
+// setUnauthorizedHandler(): it clears the stored session and sends the admin to /admin/login?next=<path>.
+
 import axios from 'axios';
 
 const PROD_URL = 'https://ahmed-cooling-backend.onrender.com/api';
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || PROD_URL;
-const FALLBACK_URL = PROD_URL;
+
+// ─────────────────────────────────────────
+// Session storage of the admin token
+// ─────────────────────────────────────────
+// Trade-off: the token lives in localStorage (not sessionStorage) so a new tab opened from the panel
+// stays signed in — QA reported having to sign in again for every tab. localStorage is readable by any
+// script on this origin, so an XSS bug would expose it; that risk is limited by the site's CSP/security
+// headers, the 8 h JWT lifetime (we also drop expired tokens here, before any request) and server-side
+// revocation on password change. Logout and any 401 clear it everywhere.
+
+const TOKEN_KEY = 'adminToken';
+const USER_KEY = 'adminUser';
+const EXPIRY_SKEW_MS = 30 * 1000; // treat a token as expired 30 s early so requests don't race the server
+
+const hasWindow = () => typeof window !== 'undefined';
+
+function decodeJwtPayload(token) {
+  try {
+    const part = String(token).split('.')[1];
+    if (!part) return null;
+    const base64 = part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '=');
+    return JSON.parse(atob(base64));
+  } catch {
+    return null;
+  }
+}
+
+// A token we can use: three JWT segments, readable payload and (if it has one) an `exp` in the future
+export function isTokenUsable(token) {
+  if (!token || typeof token !== 'string' || token.split('.').length !== 3) return false;
+  const payload = decodeJwtPayload(token);
+  if (!payload) return false;
+  if (payload.exp != null && payload.exp * 1000 - EXPIRY_SKEW_MS <= Date.now()) return false;
+  return true;
+}
+
+export function tokenExpiresAt(token) {
+  const exp = decodeJwtPayload(token)?.exp;
+  return exp ? exp * 1000 : null;
+}
+
+export function clearStoredSession() {
+  if (!hasWindow()) return;
+  for (const store of [localStorage, sessionStorage]) {
+    try {
+      store.removeItem(TOKEN_KEY);
+      store.removeItem(USER_KEY);
+    } catch { /* storage blocked */ }
+  }
+}
+
+// { token, user } from storage, or null (expired / malformed sessions are removed)
+export function readStoredSession() {
+  if (!hasWindow()) return null;
+  try {
+    // One-time migration of a session saved by the older sessionStorage-only version
+    if (!localStorage.getItem(TOKEN_KEY) && sessionStorage.getItem(TOKEN_KEY)) {
+      localStorage.setItem(TOKEN_KEY, sessionStorage.getItem(TOKEN_KEY));
+      const oldUser = sessionStorage.getItem(USER_KEY);
+      if (oldUser) localStorage.setItem(USER_KEY, oldUser);
+    }
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(USER_KEY);
+
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!isTokenUsable(token)) {
+      clearStoredSession();
+      return null;
+    }
+    let user = null;
+    try { user = JSON.parse(localStorage.getItem(USER_KEY) || 'null'); } catch { user = null; }
+    return { token, user };
+  } catch {
+    return null;
+  }
+}
+
+export function storeSession(token, user) {
+  if (!hasWindow()) return;
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(user || null));
+  } catch { /* storage blocked: the session lasts until reload */ }
+}
+
+let unauthorizedHandler = null;
+// AdminAuthContext registers its logout here; returns an unregister function
+export function setUnauthorizedHandler(fn) {
+  unauthorizedHandler = fn;
+  return () => {
+    if (unauthorizedHandler === fn) unauthorizedHandler = null;
+  };
+}
+
+// In-memory token (set by AdminAuthContext) so requests don't depend on storage being available
+let memoryToken = null;
+export function setApiToken(token) {
+  memoryToken = token || null;
+}
+
+// ─────────────────────────────────────────
+// Errors
+// ─────────────────────────────────────────
+
+export class AdminApiError extends Error {
+  constructor(status, message, errors) {
+    super(message || 'Request failed');
+    this.name = 'AdminApiError';
+    this.status = status;
+    this.errors = Array.isArray(errors) ? errors : errors ? [errors] : undefined;
+  }
+}
+
+function toAdminApiError(err) {
+  if (err instanceof AdminApiError) return err;
+  const res = err?.response;
+  if (!res) {
+    const timedOut = err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message || '');
+    return new AdminApiError(
+      0,
+      timedOut ? 'The server took too long to respond. Please try again.' : 'Cannot reach the server. Check your connection and try again.'
+    );
+  }
+  const data = res.data;
+  let message = typeof data === 'string' && data.trim() && data.length < 300 && !/^\s*</.test(data) ? data.trim() : data?.message || data?.error;
+  if (!message) {
+    if (res.status === 429) message = 'Too many attempts. Please wait a few minutes and try again.';
+    else if (res.status === 401) message = 'Your session has expired. Please sign in again.';
+    else if (res.status === 403) message = 'You do not have permission to do this.';
+    else if (res.status === 404) message = 'Not found.';
+    else if (res.status >= 500) message = 'Server error. Please try again.';
+    else message = `Request failed (${res.status})`;
+  }
+  return new AdminApiError(res.status, message, data?.errors);
+}
+
+// ─────────────────────────────────────────
+// HTTP client
+// ─────────────────────────────────────────
 
 const api = axios.create({
   baseURL: BACKEND_URL,
-  timeout: 15000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  timeout: 20000,
+  headers: { 'Content-Type': 'application/json' },
 });
 
-// Shared promise to prevent concurrent login requests
-let loginPromise = null;
-
-export async function ensureValidAdminToken() {
-  if (typeof window === 'undefined') return null;
-
-  // Clear any persistent localStorage residue
-  try { localStorage.removeItem('adminToken'); } catch (e) {}
-
-  // Read only from current active browser tab session
-  const token = sessionStorage.getItem('adminToken');
-  if (token && token.length > 35) {
-    return token;
-  }
-
-  // No valid token — user will be redirected to /admin/login
-  return null;
-}
-
-// Request interceptor: attach valid adminToken from sessionStorage
-api.interceptors.request.use(async (config) => {
-  if (typeof window !== 'undefined') {
-    let token = sessionStorage.getItem('adminToken');
-    if (!token || token.length < 35) {
-      token = await ensureValidAdminToken();
-    }
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
+api.interceptors.request.use((config) => {
+  if (hasWindow() && !config.skipAuth) {
+    const token = memoryToken || readStoredSession()?.token;
+    if (token) config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
 
-// Response interceptor: on 401, clear session and reject (no infinite retry)
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
-      // Token is invalid/expired — clear session, user must re-login
-      sessionStorage.removeItem('adminToken');
-      sessionStorage.removeItem('adminUser');
-      localStorage.removeItem('adminToken');
-      console.warn('Admin token expired or invalid — session cleared');
+    // A dropped connection (no response, not a timeout) on a read or the login is retried twice before failing
+    const config = error?.config;
+    const method = String(config?.method || 'get').toLowerCase();
+    const dropped = !error?.response && error?.code !== 'ECONNABORTED' && error?.code !== 'ERR_CANCELED';
+    const safe = method === 'get' || method === 'head' || /\/admin\/login$/.test(config?.url || '');
+    if (config && dropped && safe && (config.__networkRetry || 0) < 2) {
+      config.__networkRetry = (config.__networkRetry || 0) + 1;
+      await new Promise((resolve) => setTimeout(resolve, 700 * config.__networkRetry));
+      return api(config);
     }
-    return Promise.reject(error);
+    const status = error?.response?.status;
+    if (status === 401 && !error?.config?.skipLogoutOn401 && hasWindow()) {
+      clearStoredSession();
+      memoryToken = null;
+      try { unauthorizedHandler?.(); } catch { /* ignore */ }
+    }
+    return Promise.reject(toAdminApiError(error));
   }
 );
 
-// Helper to fetch from API — no silent mock fallbacks
-async function safeCall(apiPromise) {
-  try {
-    const res = await apiPromise;
-    return res.data;
-  } catch (err) {
-    const message = err?.response?.data?.message || err?.message || 'Server request failed';
-    console.error('API call failed:', message);
-    throw new Error(message);
-  }
-}
-
-// Helper to identify fake / troll / test bookings
-export function isFakeBooking(b) {
-  if (!b) return true;
-  const name = (b.customerName || b.user?.name || b.user?.fullName || '').toLowerCase().trim();
-  const addr = (b.address || '').toLowerCase().trim();
-  const phone = (b.phone || b.user?.phone || '').replace(/[\s-]/g, '');
-
-  // Obvious test/spam names & keyboard mashing
-  if (['test', 'testing', 'asdasd', 'qwerty', 'fake'].includes(name)) return true;
-  if (/^([a-z])\1{4,}$/i.test(name)) return true;
-
-  // Placeholder test addresses
-  if (['test', 'test address', 'dummy', 'current location'].includes(addr)) return true;
-
-  return false;
-}
+const data = (promise) => promise.then((res) => res.data);
+const id_ = (id) => encodeURIComponent(String(id));
+// Drop empty params so the URL stays clean (status: '' / q: undefined …)
+const clean = (params = {}) => Object.fromEntries(
+  Object.entries(params || {}).filter(([, v]) => v !== undefined && v !== null && v !== '')
+);
 
 // ─────────────────────────────────────────
-// EXPORTED ADMIN API METHODS
+// Auth
 // ─────────────────────────────────────────
 
+export const login = (email, password) =>
+  data(api.post('/admin/login', { email, password }, { skipAuth: true, skipLogoutOn401: true }));
+
+export const changePassword = (currentPassword, newPassword) =>
+  data(api.post('/admin/change-password', { currentPassword, newPassword }, { skipLogoutOn401: true }));
+
+// ─────────────────────────────────────────
+// Dashboard
+// ─────────────────────────────────────────
+
+export const getStats = () => data(api.get('/admin/stats'));
+
+// ─────────────────────────────────────────
+// Bookings
+// ─────────────────────────────────────────
+
+// params: { page, limit, status, priority, q, from, to, sort, unassigned: '1', overdue: '1' }
+export const getBookings = (params) => data(api.get('/admin/bookings', { params: clean(params) }));
+
+export const getBooking = (id) => data(api.get(`/admin/bookings/${id_(id)}`));
+
+export const updateBookingStatus = (id, status, { reason, expectedStatus } = {}) =>
+  data(api.put(`/bookings/${id_(id)}/status`, clean({ status, reason, expectedStatus })));
+
+export const assignTechnician = (id, technicianId) =>
+  data(api.put(`/bookings/${id_(id)}/assign`, { technicianId }));
+
+export const updatePayment = (id, { paymentStatus, paymentMethod } = {}) =>
+  data(api.patch(`/admin/bookings/${id_(id)}/payment`, clean({ paymentStatus, paymentMethod })));
+
+export const deleteBooking = (id) => data(api.delete(`/admin/bookings/${id_(id)}`));
+
+export const getTechnicians = () => data(api.get('/admin/technicians'));
+
+// ─────────────────────────────────────────
+// Technicians — ids are the technician's User id
+// ─────────────────────────────────────────
+
+// Same endpoint as getTechnicians: each technician carries cities, specialties, autoAssign and stats
+export const getTechniciansFull = () => data(api.get('/admin/technicians'));
+
+// → technician + stats + jobs (recent 50) + settlements
+export const getTechnician = (id) => data(api.get(`/admin/technicians/${id_(id)}`));
+
+// { fullName, phone, email?, password, cities[], specialties[], autoAssign, active }
+export const createTechnician = (payload) => data(api.post('/admin/technicians', payload));
+
+// Any subset of the create fields + availability; `password` resets it
+export const updateTechnician = (id, patch) => data(api.patch(`/admin/technicians/${id_(id)}`, patch));
+
+export const getSettlements = (id) => data(api.get(`/admin/technicians/${id_(id)}/settlements`));
+
+// { amount, method: 'cash'|'bank_transfer'|'other', note }
+export const addSettlement = (id, payload) => data(api.post(`/admin/technicians/${id_(id)}/settlements`, payload));
+
+// ─────────────────────────────────────────
+// App settings
+// ─────────────────────────────────────────
+
+// → { commissionRate } as a fraction (0.07 = 7%)
+export const getSettings = () => data(api.get('/admin/settings'));
+
+export const updateSettings = (patch) => data(api.put('/admin/settings', patch));
+
+// ─────────────────────────────────────────
+// Users
+// ─────────────────────────────────────────
+
+// params: { page, limit, q, role }
+export const getUsers = (params) => data(api.get('/admin/users', { params: clean(params) }));
+
+export const getUserBookings = (userId) => data(api.get(`/admin/users/${id_(userId)}/bookings`));
+
+// ─────────────────────────────────────────
+// Services
+// ─────────────────────────────────────────
+
+export const getAdminServices = () => data(api.get('/admin/services'));
+
+export const createService = (serviceData) => data(api.post('/services', serviceData));
+
+export const updateService = (id, serviceData) => data(api.put(`/services/${id_(id)}`, serviceData));
+
+export const setServiceActive = (id, active) => data(api.put(`/services/${id_(id)}`, { active: !!active }));
+
+// DELETE /services/:id deactivates (the service is kept) — call it "Deactivate" in the UI
+export const deactivateService = (id) => data(api.delete(`/services/${id_(id)}`));
+
+// ─────────────────────────────────────────
+// Reviews, inquiries, ratings
+// ─────────────────────────────────────────
+
+// params: { status: 'pending'|'approved'|'all', page, limit }
+export const getReviews = (params) => data(api.get('/admin/reviews', { params: clean(params) }));
+
+export const setReviewApproved = (id, approved) =>
+  data(api.put(`/admin/reviews/${id_(id)}/approve`, { approved: approved === true }));
+
+// params: { status: 'new'|'handled'|'all', page, limit }
+export const getInquiries = (params) => data(api.get('/admin/inquiries', { params: clean(params) }));
+
+export const setInquiryStatus = (id, status) => data(api.patch(`/admin/inquiries/${id_(id)}`, { status }));
+
+// params: { page, limit }
+export const getRatings = (params) => data(api.get('/admin/ratings', { params: clean(params) }));
+
+// ─────────────────────────────────────────
+// WhatsApp inbox
+// ─────────────────────────────────────────
+// params: { status: 'bot'|'needs_human'|'human' } — omit for every conversation
+export const getWhatsAppConversations = (params) => data(api.get('/admin/whatsapp/conversations', { params: clean(params) }));
+
+export const getWhatsAppMessages = (phone) => data(api.get(`/admin/whatsapp/conversations/${id_(phone)}/messages`));
+
+export const sendWhatsAppReply = (phone, message) =>
+  data(api.post(`/admin/whatsapp/conversations/${id_(phone)}/reply`, { message }));
+
+export const releaseWhatsAppConversation = (phone) =>
+  data(api.post(`/admin/whatsapp/conversations/${id_(phone)}/release`));
+
+// Object form for `import { adminApi } from '../adminApi'` / `import adminApi from '../adminApi'`
 export const adminApi = {
-  isFakeBooking,
-
-  // Authentication
-  async login(email, password) {
-    try {
-      // Try /auth/login first
-      const res = await api.post('/auth/login', { email, password });
-      return res.data;
-    } catch (err) {
-      // Try /admin/login as fallback
-      try {
-        const res2 = await api.post('/admin/login', { email, password });
-        return res2.data;
-      } catch (err2) {
-        const message =
-          err?.response?.data?.message ||
-          err2?.response?.data?.message ||
-          'Authentication failed. Please check your credentials.';
-        throw new Error(message);
-      }
-    }
-  },
-
-  // Dashboard Stats
-  async getStats() {
-    return safeCall(api.get('/admin/stats'));
-  },
-
-  // Bookings
-  async getAllBookings(status = 'all', page = 1, limit = 50) {
-    try {
-      await ensureValidAdminToken();
-      const res = await api.get('/admin/bookings', { params: { status, page, limit } });
-      let serverBookings = res.data?.bookings || res.data?.data || [];
-
-      // Exclude any deleted bookings
-      let deletedIds = new Set();
-      if (typeof window !== 'undefined') {
-        try {
-          const stored = JSON.parse(localStorage.getItem('admin_deleted_booking_ids') || '[]');
-          deletedIds = new Set(stored.map((x) => String(x).toLowerCase()));
-        } catch (e) {}
-      }
-
-      // Show all genuine bookings directly from DB
-      serverBookings = serverBookings.filter((b) => {
-        const idKey = String(b._id || b.bookingId || b.orderNumber || '').toLowerCase();
-        if (deletedIds.has(idKey)) return false;
-        return true;
-      });
-
-      // Prepend any locally placed bookings if not already present
-      if (typeof window !== 'undefined') {
-        try {
-          const localBookings = JSON.parse(localStorage.getItem('local_recent_bookings') || '[]');
-          if (Array.isArray(localBookings) && localBookings.length > 0) {
-            const existingKeys = new Set(
-              serverBookings.map((b) => (b.bookingId || b.orderNumber || b._id || '').toLowerCase())
-            );
-            const freshLocal = localBookings.filter(
-              (b) =>
-                !existingKeys.has((b.bookingId || b.orderNumber || b._id || '').toLowerCase()) &&
-                !deletedIds.has(String(b._id || b.bookingId || b.orderNumber).toLowerCase())
-            );
-            serverBookings = [...freshLocal, ...serverBookings];
-          }
-        } catch (e) {
-          console.warn('Error merging local bookings:', e);
-        }
-      }
-
-      return {
-        success: true,
-        bookings: serverBookings,
-        pagination: res.data?.pagination || { total: serverBookings.length, page: 1, pages: 1 },
-      };
-    } catch (err) {
-      console.warn('Error fetching server bookings:', err?.message || err);
-      let localList = [];
-      if (typeof window !== 'undefined') {
-        try {
-          localList = JSON.parse(localStorage.getItem('local_recent_bookings') || '[]');
-          localList = localList.filter((b) => !isFakeBooking(b));
-        } catch (e) {}
-      }
-      return {
-        success: true,
-        bookings: localList,
-        pagination: { total: localList.length, page: 1, pages: 1 },
-      };
-    }
-  },
-
-  async updateBookingStatus(id, status, notes = '') {
-    try {
-      const res = await api.put(`/bookings/${id}/status`, { status, notes });
-      return res.data;
-    } catch (err) {
-      try {
-        const res2 = await api.put(`/admin/bookings/${id}/status`, { status, notes });
-        return res2.data;
-      } catch (err2) {
-        const message = err2?.response?.data?.message || err?.response?.data?.message || 'Failed to update booking status';
-        throw new Error(message);
-      }
-    }
-  },
-
-  async deleteBooking(id) {
-    try {
-      const res = await api.delete(`/admin/bookings/${id}`);
-      return res.data;
-    } catch (err) {
-      try {
-        const res2 = await api.delete(`/bookings/${id}`);
-        return res2.data;
-      } catch (err2) {
-        const message = err2?.response?.data?.message || err?.response?.data?.message || 'Failed to delete booking';
-        throw new Error(message);
-      }
-    }
-  },
-
-  async confirmBooking(id) {
-    return this.updateBookingStatus(id, 'confirmed');
-  },
-
-  async cancelBooking(id, reason = 'Cancelled by admin') {
-    return this.updateBookingStatus(id, 'cancelled', reason);
-  },
-
-  // Services
-  async getServices(category) {
-    return safeCall(api.get('/services', { params: { category, active: true } }));
-  },
-
-  async createService(serviceData) {
-    const res = await api.post('/services', serviceData);
-    return res.data;
-  },
-
-  async updateService(id, serviceData) {
-    const res = await api.put(`/services/${id}`, serviceData);
-    return res.data;
-  },
-
-  async deleteService(id) {
-    const res = await api.delete(`/services/${id}`);
-    return res.data;
-  },
-
-  // Users
-  async getAllUsers() {
-    return safeCall(api.get('/admin/users'));
-  },
-
-  async getUserBookings(userId) {
-    return safeCall(api.get(`/admin/users/${userId}/bookings`));
-  },
-
-  // Reviews
-  async getReviews() {
-    try {
-      const res = await api.get('/admin/reviews');
-      return res.data;
-    } catch (e1) {
-      return safeCall(api.get('/bookings/admin/reviews'));
-    }
-  },
-
-  async approveReview(id, approved) {
-    try {
-      const res = await api.put(`/admin/reviews/${id}/approve`, { approved });
-      return res.data;
-    } catch (err) {
-      try {
-        const res2 = await api.put(`/bookings/admin/reviews/${id}/approve`, { approved });
-        return res2.data;
-      } catch (err2) {
-        const message = err2?.response?.data?.message || err?.response?.data?.message || 'Failed to update review';
-        throw new Error(message);
-      }
-    }
-  },
+  login,
+  changePassword,
+  getStats,
+  getBookings,
+  getBooking,
+  updateBookingStatus,
+  assignTechnician,
+  updatePayment,
+  deleteBooking,
+  getTechnicians,
+  getTechniciansFull,
+  getTechnician,
+  createTechnician,
+  updateTechnician,
+  getSettlements,
+  addSettlement,
+  getSettings,
+  updateSettings,
+  getUsers,
+  getUserBookings,
+  getAdminServices,
+  createService,
+  updateService,
+  setServiceActive,
+  deactivateService,
+  getReviews,
+  setReviewApproved,
+  getInquiries,
+  setInquiryStatus,
+  getRatings,
+  getWhatsAppConversations,
+  getWhatsAppMessages,
+  sendWhatsAppReply,
+  releaseWhatsAppConversation,
 };
 
 export default adminApi;
