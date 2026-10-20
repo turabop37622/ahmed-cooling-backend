@@ -62,6 +62,21 @@ app.use(cors({
 // some routes by the email/phone in the body.
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ limit: '100kb', extended: true }));
+
+// Meta's WhatsApp webhook verification handshake uses dotted query keys (hub.mode, hub.verify_token,
+// hub.challenge), which rejectMongoOperators below would otherwise reject as a NoSQL-injection attempt — so this
+// has to be registered, and answered, before that middleware runs. (The POST side, which carries the actual
+// messages, is routes/whatsappWebhook.js, mounted later with the rest of the API.)
+app.get('/api/whatsapp/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && process.env.WHATSAPP_VERIFY_TOKEN && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
 app.use(rejectMongoOperators);
 
 mountAuthLimiters(app);
