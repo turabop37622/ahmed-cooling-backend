@@ -254,6 +254,14 @@
         type: String
       },
 
+      // WhatsApp booking-confirmation bot (utils/whatsappBookingBot.js): tracks whether the "please confirm"
+      // message was already sent (so the 5-minute cron never sends it twice) and whether we are currently
+      // waiting on the customer's cancellation reason after they tapped "No".
+      whatsappBot: {
+        confirmationSentAt: { type: Date },
+        awaitingCancelReason: { type: Boolean, default: false }
+      },
+
       // Soft delete (admin): hidden from every customer and admin list, kept for the records.
       deletedAt: { type: Date },
       deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

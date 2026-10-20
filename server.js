@@ -1488,6 +1488,12 @@ async function startServer() {
     console.log('✅ Admin routes loaded');
 
     // ============================================
+    // WHATSAPP BOOKING-CONFIRMATION BOT
+    // ============================================
+    app.use('/api/whatsapp', require('./routes/whatsappWebhook'));
+    require('./utils/whatsappBookingBot').startScheduler();
+
+    // ============================================
     // GEOCODE PROXY (keeps Google API key server-side)
     // ============================================
     const geocodeCache = new Map(); // "lat,lng,lang" (3 decimals) -> { address, expires }

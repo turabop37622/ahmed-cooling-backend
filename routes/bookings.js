@@ -1425,4 +1425,12 @@ router.put('/:id/report-issue', auth, async (req, res) => {
   }
 });
 
+// Exposed so utils/whatsappBookingBot.js can send the same confirmation/cancellation emails and in-app
+// notifications as the admin-panel and email-link flows, instead of duplicating that HTML/logic.
+router.notifyBooking = notifyBooking;
+router.sendBookingConfirmedEmail = sendBookingConfirmedEmail;
+router.sendCustomerCancellationEmail = sendCustomerCancellationEmail;
+router.emailServiceFields = emailServiceFields;
+router.audit = audit;
+
 module.exports = router;
