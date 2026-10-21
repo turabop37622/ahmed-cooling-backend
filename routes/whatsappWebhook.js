@@ -21,27 +21,36 @@ const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 
 const toWaId = (message, waId) => `+${String(waId || message.from || '').replace(/^\+/, '')}`;
 
-const inboundText = (message) =>
-  message.type === 'text' ? (message.text?.body || '')
-    : message.button?.text || message.interactive?.button_reply?.title || '';
+// A tap on one of OUR OWN interactive messages (utils/whatsappCloud.js sendButtonsMessage/sendListMessage) —
+// distinct from `message.button`, which is a tap on an approved TEMPLATE's fixed quick-reply button.
+const interactiveReply = (message) => message.interactive?.button_reply || message.interactive?.list_reply || null;
 
-const buttonPayload = (message) => message.button?.payload || message.interactive?.button_reply?.id;
+const inboundText = (message) => {
+  if (message.type === 'text') return message.text?.body || '';
+  return interactiveReply(message)?.title || message.button?.text || '';
+};
+
+// Fixed payload from an approved template's quick-reply button (utils/whatsappBookingBot.js's "please confirm"
+// nudge) — never present on our own interactive messages, which carry an `id` instead (see interactiveReply).
+const buttonPayload = (message) => message.button?.payload;
+const interactiveId = (message) => interactiveReply(message)?.id || null;
 
 const handleMessage = async (message, waId, customerName) => {
   if (!waId && !message.from) return;
   const phone = toWaId(message, waId);
   const text = inboundText(message);
   const payload = buttonPayload(message);
+  const id = interactiveId(message);
 
-  const conversation = await store.logMessage(phone, 'in', text || payload || `[${message.type}]`, {
-    messageType: payload ? 'button' : 'text',
+  const conversation = await store.logMessage(phone, 'in', text || id || payload || `[${message.type}]`, {
+    messageType: (payload || id) ? 'button' : 'text',
     customerName,
   });
 
   if (payload && await bookingBot.handleBookingButton(phone, payload)) return;
   if (message.type === 'text' && text && await bookingBot.handleBookingReasonText(phone, text)) return;
   if (message.type === 'text' && text && await bookingBot.handleAddressFixText(phone, text)) return;
-  if (message.type === 'text' && text && conversation?.status === 'bot' && await bookingFlow.handleMessage(phone, text, conversation)) return;
+  if ((id || (message.type === 'text' && text)) && conversation?.status === 'bot' && await bookingFlow.handleMessage(phone, id || text, conversation)) return;
   if (message.type === 'text' && text) await chatbot.handleIncomingText(phone, text, conversation);
 };
 

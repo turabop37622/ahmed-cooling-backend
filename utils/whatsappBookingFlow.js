@@ -2,11 +2,16 @@
 // service -> date -> time -> address -> confirm) rather than free-form AI extraction, so the data that actually
 // becomes a booking is always validated the same way the app/website validate it.
 //
+// Service selection and the final confirm step use WhatsApp's native interactive messages (a tappable list /
+// reply buttons) instead of "reply with a number" — only possible because this whole flow only ever runs after
+// the customer has messaged us first (Meta's 24h customer-service window), unlike the very first "please
+// confirm" nudge in utils/whatsappBookingBot.js, which still has to be an approved template.
+//
 // Reuses the real booking-creation logic (routes/bookings.js: createBookingForPhone) — same pricing, emails,
 // auto-assignment and admin notification as a booking made in the app.
 const Service = require('../models/Service');
 const WhatsAppConversation = require('../models/WhatsAppConversation');
-const { sendTextMessage } = require('./whatsappCloud');
+const { sendTextMessage, sendButtonsMessage, sendListMessage } = require('./whatsappCloud');
 const { logMessage } = require('./whatsappConversationStore');
 const { isBookableDate, isIsoDate, riyadhDate, addDays, normalizeTime } = require('./schedule');
 const { normalizeCity } = require('./autoAssign');
@@ -16,6 +21,12 @@ let catalogueServices = [];
 try { catalogueServices = require('../web/src/lib/services.json'); } catch { catalogueServices = []; }
 // Package catalogue entries carry their own fixed price (visit fee included) and are not real Service documents.
 const isPackage = (item) => item.isPackage === true;
+
+// WhatsApp list messages allow at most 10 rows total — popular services first, then whatever else fits.
+const LIST_SERVICES = [
+  ...catalogueServices.filter((s) => s.isPopular),
+  ...catalogueServices.filter((s) => !s.isPopular),
+].slice(0, 10);
 
 const BOOKING_INTENT_RE = /\b(book|booking|schedule|appointment)\b|(احجز|حجز|موعد|اريد\s*حجز|أريد\s*حجز)|(\bbook\s*karna\b|\bbooking\s*karni\b)/i;
 const CANCEL_RE = /\b(cancel|stop|nevermind|never mind)\b|(الغاء|إلغاء|لا أريد)|(\bcancel\s*kar\b|\brehnay\s*do\b)/i;
@@ -36,10 +47,20 @@ const reply = async (phone, text) => {
   await logMessage(phone, 'out', text, { messageType: 'text', sentBy: 'bot' });
 };
 
-const serviceListText = (isAr) => {
-  const lines = catalogueServices.slice(0, 25).map((s, i) =>
-    `${i + 1}. ${isAr && s.nameAr ? s.nameAr : s.name} — ${L(isAr, 'from', 'يبدأ من')} SAR ${s.basePrice}`);
-  return `${L(isAr, 'Which service would you like to book? Reply with the number:', 'ما الخدمة التي تريد حجزها؟ الرجاء الرد برقمها:')}\n\n${lines.join('\n')}`;
+const replyButtons = async (phone, bodyText, buttons) => {
+  await sendButtonsMessage(phone, bodyText, buttons);
+  await logMessage(phone, 'out', `${bodyText} [${buttons.map((b) => b.title).join(' / ')}]`, { messageType: 'button', sentBy: 'bot' });
+};
+
+const replyServiceList = async (phone, isAr) => {
+  const bodyText = L(isAr, 'Which service would you like to book?', 'ما الخدمة التي تريد حجزها؟');
+  const rows = LIST_SERVICES.map((s, i) => ({
+    id: `svc_${i}`,
+    title: isAr && s.nameAr ? s.nameAr : s.name,
+    description: `${L(isAr, 'From', 'يبدأ من')} SAR ${s.basePrice}`,
+  }));
+  await sendListMessage(phone, bodyText, L(isAr, 'View services', 'عرض الخدمات'), [{ rows }]);
+  await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
 };
 
 // A real "year-month-day" only if that calendar date actually exists (isIsoDate round-trips it), else null.
@@ -94,48 +115,55 @@ const loosenTime = (text) => {
 // Starts the flow if the message looks like a booking request and none is already in progress. Returns true if
 // it handled the message (started the flow, or is mid-flow and advanced/re-asked a step), false if this message
 // is unrelated and should go to the general FAQ bot instead.
-const handleMessage = async (phone, text, conversation) => {
-  const isAr = conversation?.customerName ? looksArabic(conversation.customerName) : looksArabic(text);
+// `input` is either plain typed text, or the `id` of a tapped list row / reply button (see routes/whatsappWebhook.js).
+const handleMessage = async (phone, input, conversation) => {
+  const isAr = conversation?.customerName ? looksArabic(conversation.customerName) : looksArabic(input);
   const draft = conversation?.bookingDraft;
 
   if (draft?.step) {
-    if (CANCEL_RE.test(text)) {
+    if (input !== 'confirm_cancel' && CANCEL_RE.test(input)) {
       await setDraft(phone, null);
       await reply(phone, L(isAr, 'Okay, no booking made. Let me know if you\'d like to start again.', 'تم، لم يتم إنشاء أي حجز. أخبرنا إذا أردت البدء من جديد.'));
       return true;
     }
-    await advanceDraft(phone, text, draft, isAr);
+    await advanceDraft(phone, input, draft, isAr);
     return true;
   }
 
-  if (!BOOKING_INTENT_RE.test(text)) return false;
+  if (!BOOKING_INTENT_RE.test(input)) return false;
 
-  if (!catalogueServices.length) {
+  if (!LIST_SERVICES.length) {
     await reply(phone, L(isAr, 'Sorry, bookings aren\'t available right now — please use our app or website.', 'عذراً، الحجز غير متاح الآن — الرجاء استخدام التطبيق أو الموقع.'));
     return true;
   }
 
   await setDraft(phone, { step: 'service' });
-  await reply(phone, serviceListText(isAr));
+  await replyServiceList(phone, isAr);
   return true;
 };
 
-const advanceDraft = async (phone, text, draft, isAr) => {
+const advanceDraft = async (phone, input, draft, isAr) => {
   if (draft.step === 'service') {
-    const n = parseInt(text.trim(), 10);
-    const item = Number.isInteger(n) ? catalogueServices[n - 1] : null;
+    const m = /^svc_(\d+)$/.exec(input);
+    const index = m ? Number(m[1]) : (Number.isInteger(parseInt(input.trim(), 10)) ? parseInt(input.trim(), 10) - 1 : NaN);
+    const item = LIST_SERVICES[index];
     if (!item) {
-      await reply(phone, L(isAr, 'Please reply with just the number of the service from the list above.', 'الرجاء الرد برقم الخدمة من القائمة أعلاه فقط.'));
+      await reply(phone, L(isAr, 'Please pick a service from the list above.', 'الرجاء اختيار خدمة من القائمة أعلاه.'));
+      await replyServiceList(phone, isAr);
       return;
     }
     await setDraft(phone, { step: 'date', serviceId: String(item._id), serviceName: item.name, serviceNameAr: item.nameAr || item.name });
+    await replyButtons(phone,
+      L(isAr, 'Great. What date would you like?', 'ممتاز. ما التاريخ المناسب؟'),
+      [{ id: 'date_today', title: L(isAr, 'Today', 'اليوم') }, { id: 'date_tomorrow', title: L(isAr, 'Tomorrow', 'غداً') }]);
     await reply(phone, L(isAr,
-      'Great. What date would you like? Reply "today", "tomorrow", a day like "30", "30/11", or a full date like 2026-11-05.',
-      'ممتاز. ما التاريخ المناسب؟ أرسل "اليوم" أو "غداً" أو يوم مثل "30" أو "30/11" أو تاريخ كامل مثل 2026-11-05.'));
+      'Or type a specific date, e.g. "30", "30/11", or 2026-11-05.',
+      'أو أرسل تاريخاً محدداً، مثل "30" أو "30/11" أو 2026-11-05.'));
     return;
   }
 
   if (draft.step === 'date') {
+    const text = input === 'date_today' ? 'today' : input === 'date_tomorrow' ? 'tomorrow' : input;
     const date = parseDate(text);
     if (!date || !isBookableDate(date)) {
       await reply(phone, L(isAr,
@@ -151,7 +179,7 @@ const advanceDraft = async (phone, text, draft, isAr) => {
   }
 
   if (draft.step === 'time') {
-    const time = normalizeTime(loosenTime(text.trim())) || (/anytime|أي\s*وقت/i.test(text) ? 'Anytime' : null);
+    const time = normalizeTime(loosenTime(input.trim())) || (/anytime|أي\s*وقت/i.test(input) ? 'Anytime' : null);
     if (!time) {
       await reply(phone, L(isAr,
         'I didn\'t understand that time — try something like "10:00 AM", "1pm", or "Anytime".',
@@ -164,7 +192,7 @@ const advanceDraft = async (phone, text, draft, isAr) => {
   }
 
   if (draft.step === 'address') {
-    const address = text.trim().slice(0, 300);
+    const address = input.trim().slice(0, 300);
     if (address.length < 12 || !/\s/.test(address)) {
       await reply(phone, L(isAr,
         'That\'s too short for a technician to find you — please include the area, street, and building/landmark.',
@@ -180,31 +208,37 @@ const advanceDraft = async (phone, text, draft, isAr) => {
     const confirmed = { ...draft, step: 'confirm', address };
     await setDraft(phone, confirmed);
     const serviceLabel = isAr ? confirmed.serviceNameAr : confirmed.serviceName;
-    await reply(phone, L(isAr,
-      `Please confirm:\n• Service: ${serviceLabel}\n• Date: ${confirmed.date}\n• Time: ${confirmed.time}\n• Address: ${address}\n\nReply YES to confirm, NO to cancel, or CHANGE to pick different details.`,
-      `الرجاء التأكيد:\n• الخدمة: ${serviceLabel}\n• التاريخ: ${confirmed.date}\n• الوقت: ${confirmed.time}\n• العنوان: ${address}\n\nأرسل "نعم" للتأكيد أو "لا" للإلغاء أو "تغيير" لاختيار تفاصيل مختلفة.`));
+    await replyButtons(phone,
+      L(isAr,
+        `Please confirm:\n• Service: ${serviceLabel}\n• Date: ${confirmed.date}\n• Time: ${confirmed.time}\n• Address: ${address}`,
+        `الرجاء التأكيد:\n• الخدمة: ${serviceLabel}\n• التاريخ: ${confirmed.date}\n• الوقت: ${confirmed.time}\n• العنوان: ${address}`),
+      [
+        { id: 'confirm_yes', title: L(isAr, 'Yes, confirm', 'نعم، أؤكد') },
+        { id: 'confirm_change', title: L(isAr, 'Change', 'تغيير') },
+        { id: 'confirm_cancel', title: L(isAr, 'No, cancel', 'لا، إلغاء') },
+      ]);
     return;
   }
 
   if (draft.step === 'confirm') {
-    const t = text.trim();
-    if (/\b(yes|yeah|yep|confirm|ok|okay)\b/i.test(t) || /نعم|أكيد|اكيد|تأكيد|موافق/.test(t)) {
+    const t = input.trim();
+    if (t === 'confirm_yes' || /\b(yes|yeah|yep|confirm|ok|okay)\b/i.test(t) || /نعم|أكيد|اكيد|تأكيد|موافق/.test(t)) {
       await createFromDraft(phone, draft, isAr);
       return;
     }
-    if (/\b(no|nope|cancel)\b/i.test(t) || /^لا\b|إلغاء|الغاء/.test(t)) {
+    if (t === 'confirm_cancel' || /\b(no|nope|cancel)\b/i.test(t) || /^لا\b|إلغاء|الغاء/.test(t)) {
       await setDraft(phone, null);
       await reply(phone, L(isAr, 'Okay, no booking made.', 'تم، لم يتم إنشاء أي حجز.'));
       return;
     }
-    if (/\b(change|edit|redo|restart)\b/i.test(t) || /تغيير|تعديل|غير/.test(t)) {
+    if (t === 'confirm_change' || /\b(change|edit|redo|restart)\b/i.test(t) || /تغيير|تعديل|غير/.test(t)) {
       await setDraft(phone, { step: 'service' });
-      await reply(phone, serviceListText(isAr));
+      await replyServiceList(phone, isAr);
       return;
     }
     await reply(phone, L(isAr,
-      'Please reply YES to confirm, NO to cancel, or CHANGE to start over and pick different details.',
-      'الرجاء الرد بـ "نعم" للتأكيد أو "لا" للإلغاء أو "تغيير" للبدء من جديد باختيار تفاصيل مختلفة.'));
+      'Please choose Yes, Change, or No from the buttons above.',
+      'الرجاء اختيار نعم أو تغيير أو لا من الأزرار أعلاه.'));
   }
 };
 

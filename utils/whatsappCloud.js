@@ -50,4 +50,40 @@ const sendTextMessage = (to, text) => post({
   text: { body: text, preview_url: false },
 });
 
-module.exports = { isConfigured, sendTemplateMessage, sendTextMessage, toWaId };
+// Up to 3 tappable reply buttons (customer picks one instead of typing) — same 24h-window rule as plain text.
+// `buttons`: [{ id, title }], title max 20 characters (Meta truncates/rejects longer ones).
+const sendButtonsMessage = (to, bodyText, buttons) => post({
+  messaging_product: 'whatsapp',
+  to: toWaId(to),
+  type: 'interactive',
+  interactive: {
+    type: 'button',
+    body: { text: bodyText },
+    action: { buttons: buttons.slice(0, 3).map((b) => ({ type: 'reply', reply: { id: b.id, title: String(b.title).slice(0, 20) } })) },
+  },
+});
+
+// A scrollable native picker (customer taps "View options" then picks a row) — up to 10 rows total across all
+// sections. `sections`: [{ title, rows: [{ id, title, description }] }].
+const sendListMessage = (to, bodyText, buttonText, sections) => post({
+  messaging_product: 'whatsapp',
+  to: toWaId(to),
+  type: 'interactive',
+  interactive: {
+    type: 'list',
+    body: { text: bodyText },
+    action: {
+      button: String(buttonText).slice(0, 20),
+      sections: sections.map((s) => ({
+        title: s.title ? String(s.title).slice(0, 24) : undefined,
+        rows: s.rows.slice(0, 10).map((r) => ({
+          id: String(r.id),
+          title: String(r.title).slice(0, 24),
+          description: r.description ? String(r.description).slice(0, 72) : undefined,
+        })),
+      })),
+    },
+  },
+});
+
+module.exports = { isConfigured, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, toWaId };
