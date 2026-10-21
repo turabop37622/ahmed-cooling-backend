@@ -1,6 +1,6 @@
 // General-purpose WhatsApp FAQ bot: answers free-form customer questions (services, pricing, areas served) using
-// Claude, and hands off to a human (an admin, via the admin panel's WhatsApp Inbox — see routes/adminWhatsapp.js)
-// the moment a customer asks for one, or when Claude itself decides the question needs a person.
+// Gemini, and hands off to a human (an admin, via the admin panel's WhatsApp Inbox — see routes/adminWhatsapp.js)
+// the moment a customer asks for one, or when the model itself decides the question needs a person.
 //
 // This never touches booking status — that stays with utils/whatsappBookingBot.js and, ultimately, the admin's
 // own confirm/cancel action in the existing admin bookings panel.
@@ -12,8 +12,8 @@ const { logMessage, setStatus } = require('./whatsappConversationStore');
 let catalogueServices = [];
 try { catalogueServices = require('../web/src/lib/services.json'); } catch { catalogueServices = []; }
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 const VISIT_CHARGE = (() => {
   const n = Number(process.env.VISIT_CHARGE);
   return Number.isFinite(n) && n >= 0 ? n : 30;
@@ -23,7 +23,7 @@ const SENDER_EMAIL = process.env.EMAIL_FROM || ADMIN_EMAIL;
 const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
 // Keyword-based handoff detection: fast, free, and deterministic for the common ways someone asks for a human,
-// in English, Arabic and Roman Urdu. Claude can still ask for a handoff itself (see HANDOFF_MARKER below) for
+// in English, Arabic and Roman Urdu. Gemini can still ask for a handoff itself (see HANDOFF_MARKER below) for
 // cases this list doesn't catch — complaints, price negotiation, anything it isn't confident answering.
 const HANDOFF_RE = /\b(human|real\s*person|speak\s*to\s*(someone|a\s*person)|talk\s*to\s*(someone|a\s*person|a\s*human|your\s*(team|staff|worker|technician))|customer\s*(service|care)\s*(agent|rep)|representative|agent)\b|(شخص\s*حقيقي|موظف|ممثل|أتكلم\s*مع|اتكلم\s*مع|تحويلي|محول)|(\binsaan\b|\bbanda\b|\bworker\s*se\b|\bkisi\s*insan\b|\breal\s*person\b|\binsan\s*se\s*baat\b)/i;
 
@@ -52,26 +52,24 @@ Rules:
 - If the customer is upset, asks for a discount/negotiation, reports a problem with a technician, or asks anything you are not confident answering from the facts above, end your reply with the exact text ${HANDOFF_MARKER} on its own — a human will take over.`;
 };
 
-const callClaude = async (phone, userText) => {
-  if (!ANTHROPIC_API_KEY) return null;
+const callGemini = async (phone, userText) => {
+  if (!GEMINI_API_KEY) return null;
   try {
-    const { data } = await axios.post('https://api.anthropic.com/v1/messages', {
-      model: ANTHROPIC_MODEL,
-      max_tokens: 400,
-      system: SYSTEM_PROMPT(),
-      messages: [{ role: 'user', content: userText }],
-    }, {
-      headers: {
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'Content-Type': 'application/json',
+    const { data } = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      {
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT() }] },
+        contents: [{ role: 'user', parts: [{ text: userText }] }],
+        // thinkingBudget: 0 — a WhatsApp FAQ answer doesn't need extended reasoning, and without this the model's
+        // internal "thinking" tokens can eat the whole maxOutputTokens budget before any reply text is written.
+        generationConfig: { maxOutputTokens: 500, thinkingConfig: { thinkingBudget: 0 } },
       },
-      timeout: 20000,
-    });
-    const text = (data.content || []).map((b) => b.text || '').join('').trim();
+      { params: { key: GEMINI_API_KEY }, headers: { 'Content-Type': 'application/json' }, timeout: 20000 }
+    );
+    const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim();
     return text || null;
   } catch (err) {
-    console.error('❌ Claude WhatsApp reply failed:', err.response?.data || err.message);
+    console.error('❌ Gemini WhatsApp reply failed:', err.response?.data || err.message);
     return null;
   }
 };
@@ -118,8 +116,8 @@ const handleIncomingText = async (phone, text, conversation) => {
     return;
   }
 
-  const reply = await callClaude(phone, text);
-  if (!reply) return; // not configured, or Claude failed — admin can still see the message in the inbox and reply
+  const reply = await callGemini(phone, text);
+  if (!reply) return; // not configured, or Gemini failed — admin can still see the message in the inbox and reply
 
   const handoff = reply.includes(HANDOFF_MARKER);
   const cleanReply = reply.replace(HANDOFF_MARKER, '').trim() || HANDOFF_ACK(looksArabic(text));
