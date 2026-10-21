@@ -2,12 +2,14 @@
 // utils/whatsappConversationStore.js) and then routes to whichever flow should answer:
 //   1. A quick-reply tap on the booking-confirmation template -> utils/whatsappBookingBot.js
 //   2. Freeform text that answers an open "why are you cancelling?" question -> also whatsappBookingBot.js
-//   3. Anything else -> utils/whatsappChatbot.js (general FAQ answers + "talk to a human" handoff)
+//   3. A "book a service" request, or a reply continuing one already in progress -> utils/whatsappBookingFlow.js
+//   4. Anything else -> utils/whatsappChatbot.js (general FAQ answers + "talk to a human" handoff)
 //
 // Docs: https://developers.facebook.com/docs/graph-api/webhooks/getting-started
 const express = require('express');
 const router = express.Router();
 const bookingBot = require('../utils/whatsappBookingBot');
+const bookingFlow = require('../utils/whatsappBookingFlow');
 const chatbot = require('../utils/whatsappChatbot');
 const store = require('../utils/whatsappConversationStore');
 
@@ -37,6 +39,7 @@ const handleMessage = async (message, waId, customerName) => {
 
   if (payload && await bookingBot.handleBookingButton(phone, payload)) return;
   if (message.type === 'text' && text && await bookingBot.handleBookingReasonText(phone, text)) return;
+  if (message.type === 'text' && text && conversation?.status === 'bot' && await bookingFlow.handleMessage(phone, text, conversation)) return;
   if (message.type === 'text' && text) await chatbot.handleIncomingText(phone, text, conversation);
 };
 

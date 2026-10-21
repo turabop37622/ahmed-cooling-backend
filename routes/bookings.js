@@ -1024,6 +1024,79 @@ router.post('/public', auth, createLimiter, [
   }
 });
 
+// Creates a booking from a WhatsApp conversation (utils/whatsappBookingFlow.js) — same fields, pricing, emails,
+// auto-assign and notifications as the authenticated /public route above, but for a customer who only has a
+// phone number (no app account/JWT). Finds or creates a lightweight "phone" account for them, exactly like the
+// phone+OTP login path (authProvider: 'phone') already used elsewhere in this app.
+// `serviceRecord` must already be a loaded, active Service document or catalogue package (the caller is
+// responsible for resolving whichever one the customer picked, since WhatsApp has no id-aware input widget).
+const createBookingForPhone = async ({ customerName, phone, serviceRecord, date, time, address, language }) => {
+  const normalizedPhone = normalizePhone(phone);
+  const packageRecord = CATALOGUE_PACKAGES.find((item) => item._id === String(serviceRecord._id)) || null;
+
+  let user = await User.findOne({ phone: normalizedPhone, role: 'customer' });
+  if (!user) {
+    user = await User.create({
+      fullName: customerName || 'WhatsApp Customer',
+      phone: normalizedPhone,
+      role: 'customer',
+      authProvider: 'phone',
+      isPhoneVerified: true, // Meta already verifies WhatsApp ownership of this number
+      isVerified: true,
+      language: language === 'ar' ? 'ar' : 'en',
+    });
+  }
+
+  const { country: detectedCountry, currency: detectedCurrency } = countryFromPhone(normalizedPhone);
+  const bookingId = `BK${crypto.randomUUID().replace(/-/g, '').slice(0, 16).toUpperCase()}`;
+  const orderNumber = `ORD-${riyadhCompactDate()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+  const emailActionNonce = crypto.randomBytes(16).toString('hex');
+  const servicePrice = serviceRecord.basePrice;
+  const visitCharges = packageRecord ? 0 : VISIT_CHARGE;
+  const totalAmount = servicePrice + visitCharges;
+
+  const booking = await Booking.create({
+    bookingId, orderNumber,
+    user: user._id,
+    customerName: customerName || user.fullName,
+    phone: normalizedPhone,
+    email: user.email || '',
+    service: { id: serviceRecord._id, name: serviceRecord.name, name_ar: serviceRecord.nameAr, icon: serviceRecord.icon, basePrice: servicePrice, category: serviceRecord.category },
+    date, time,
+    address,
+    country: detectedCountry,
+    currency: detectedCurrency,
+    coordinates: { latitude: 0, longitude: 0 },
+    platform: 'web',
+    language: language === 'ar' ? 'ar' : 'en',
+    status: 'pending',
+    servicePrice, visitCharges, totalAmount,
+    emailActionNonce,
+    statusHistory: [{ status: 'pending', timestamp: new Date(), note: 'Booked via WhatsApp', actorRole: 'customer', actor: user._id }],
+  });
+
+  const emailData = {
+    bookingId, orderNumber, customerName: booking.customerName,
+    customerEmail: user.email || '', customerPhone: normalizedPhone,
+    country: detectedCountry, city: '', currency: detectedCurrency,
+    serviceName: serviceRecord.name, serviceIcon: serviceRecord.icon || '❄️',
+    date, time, address, comments: '',
+    servicePrice, visitCharges, totalAmount,
+  };
+  if (user.email) sendBookingReceivedEmail(user.email, emailData);
+  sendAdminNotificationEmail({ ...emailData, emailNonce: emailActionNonce });
+  notifyBooking(booking, 'received');
+
+  const auto = await autoAssign.autoAssignBooking(booking);
+  if (auto && auto.booking) {
+    notifyBooking(auto.booking, 'assigned');
+    notifyTechnicianJob(auto.booking.technician, auto.booking, 'assigned').catch(() => {});
+  }
+
+  return auto && auto.booking ? auto.booking : booking;
+};
+router.createBookingForPhone = createBookingForPhone;
+
 router.get('/public/:bookingId', auth, async (req, res) => {
   try {
     const booking = await Booking.findOne({ bookingId: String(req.params.bookingId) });

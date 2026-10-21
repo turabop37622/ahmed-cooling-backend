@@ -10,6 +10,17 @@ const whatsAppConversationSchema = new mongoose.Schema({
   lastMessagePreview: { type: String, default: '' },
   lastMessageAt: { type: Date, default: Date.now },
   lastDirection: { type: String, enum: ['in', 'out'] },
+  // In-progress "book a service over WhatsApp" conversation (utils/whatsappBookingFlow.js). Unset once the
+  // booking is created or the customer cancels/abandons it.
+  bookingDraft: {
+    step: { type: String, enum: ['service', 'date', 'time', 'address', 'confirm'] },
+    serviceId: String,
+    serviceName: String,
+    serviceNameAr: String,
+    date: String,
+    time: String,
+    address: String,
+  },
 }, { timestamps: true });
 
 module.exports = mongoose.model('WhatsAppConversation', whatsAppConversationSchema);
