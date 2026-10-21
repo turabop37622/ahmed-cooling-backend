@@ -9,6 +9,7 @@ const WhatsAppConversation = require('../models/WhatsAppConversation');
 const { sendTextMessage } = require('./whatsappCloud');
 const { logMessage } = require('./whatsappConversationStore');
 const { isBookableDate, isIsoDate, riyadhDate, addDays, normalizeTime } = require('./schedule');
+const { normalizeCity } = require('./autoAssign');
 const bookingsRouter = require('../routes/bookings');
 
 let catalogueServices = [];
@@ -168,6 +169,12 @@ const advanceDraft = async (phone, text, draft, isAr) => {
       await reply(phone, L(isAr,
         'That\'s too short for a technician to find you — please include the area, street, and building/landmark.',
         'هذا العنوان غير كافٍ لوصول الفني — الرجاء ذكر الحي والشارع والمبنى أو أقرب معلم.'));
+      return;
+    }
+    if (!normalizeCity(address)) {
+      await reply(phone, L(isAr,
+        'We only serve Jeddah and Makkah — please include the city name in your address (e.g. "..., Jeddah").',
+        'نقدم خدماتنا في جدة ومكة فقط — الرجاء ذكر اسم المدينة ضمن العنوان (مثال: "...، جدة").'));
       return;
     }
     const confirmed = { ...draft, step: 'confirm', address };
