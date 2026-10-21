@@ -3,11 +3,12 @@
 // Flow: a few minutes after a booking is created (status 'pending'), we send the customer a WhatsApp message
 // (an approved template, since this is the first message WE send — Meta requires that outside the customer's
 // own 24h messaging window) asking them to confirm, with two quick-reply buttons.
-//   - They tap "Yes"  -> we record it and ask the admin to confirm (the actual status change always happens
-//                        through the existing admin bookings panel, never automatically from here).
+//   - They tap "Yes"  -> the booking moves straight to 'confirmed' and we immediately retry auto-assignment
+//                        (utils/autoAssign.js) so it reaches a technician right away, same as a booking made on
+//                        WhatsApp or the app/website — no admin step in between.
 //   - They tap "No"   -> we ask (freeform text — now inside the 24h window because they just messaged us) why,
-//                        then whatever they reply next is recorded as the reason, and again the admin cancels it
-//                        themselves from the bookings panel.
+//                        then whatever they reply next is recorded as the reason, and the admin cancels it
+//                        themselves from the bookings panel (cancellation still goes through a human).
 //
 // Template quick-reply buttons carry a FIXED payload set at template-creation time (Meta does not support a
 // per-send dynamic payload), so we cannot stash the bookingId in the button click itself. Instead we match the
@@ -19,6 +20,8 @@ const { normalizePhone, canonicalSaudiMobile, phoneVariants } = require('./phone
 const { escapeHtml } = require('./security');
 const whatsappCloud = require('./whatsappCloud');
 const { logMessage } = require('./whatsappConversationStore');
+const autoAssign = require('./autoAssign');
+const { notifyTechnicianJob } = require('./notify');
 
 const TEMPLATE_NAME = process.env.WHATSAPP_CONFIRM_TEMPLATE_NAME || 'booking_confirmation';
 const TEMPLATE_LANG = process.env.WHATSAPP_CONFIRM_TEMPLATE_LANG || 'ar';
@@ -39,23 +42,28 @@ const emailServiceName = (booking) => {
   return s.name || s.titleKey || booking.serviceDetails?.name || 'AC Service';
 };
 
-const notifyAdminBookingReply = async (booking, { reply, reason }) => {
+const notifyAdminBookingReply = async (booking, { reply, reason, autoAssigned }) => {
   if (!BREVO_API_KEY || !ADMIN_EMAIL) return;
   try {
+    const confirmNote = autoAssigned
+      ? `✅ YES — confirmed and auto-assigned to a technician`
+      : reply === 'confirm' ? '✅ YES — confirmed (no technician auto-assigned yet, needs one from the bookings page)' : null;
     await axios.post('https://api.brevo.com/v3/smtp/email', {
       sender: { name: 'Ahmed Cooling - WhatsApp Bot', email: SENDER_EMAIL },
       to: [{ email: ADMIN_EMAIL }],
       subject: `📋 WhatsApp reply on booking ${booking.orderNumber || booking.bookingId}: customer said ${reply === 'confirm' ? 'YES' : 'NO'}`,
       htmlContent: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;">
         <h2 style="color:${reply === 'confirm' ? '#059669' : '#DC2626'};">
-          Customer replied ${reply === 'confirm' ? '✅ YES — please confirm' : '❌ NO — please cancel'} on WhatsApp
+          Customer replied ${reply === 'confirm' ? (confirmNote || '✅ YES') : '❌ NO — please cancel'} on WhatsApp
         </h2>
         <p><strong>Booking:</strong> ${escapeHtml(booking.orderNumber || booking.bookingId || '')}</p>
         <p><strong>Customer:</strong> ${escapeHtml(booking.customerName || '')} (${escapeHtml(booking.phone || '')})</p>
         <p><strong>Service:</strong> ${escapeHtml(emailServiceName(booking))}</p>
         <p><strong>Date/time:</strong> ${escapeHtml(booking.date || '')} ${escapeHtml(booking.time || '')}</p>
         ${reason ? `<p><strong>Reason given:</strong> ${escapeHtml(reason)}</p>` : ''}
-        <p>Open the admin panel's <strong>Bookings</strong> page to ${reply === 'confirm' ? 'confirm' : 'cancel'} it.</p>
+        ${reply === 'confirm'
+          ? (autoAssigned ? '<p>No action needed — a technician is already assigned.</p>' : '<p>Open the admin panel\'s <strong>Bookings</strong> page to assign a technician.</p>')
+          : '<p>Open the admin panel\'s <strong>Bookings</strong> page to cancel it.</p>'}
       </div>`,
     }, { headers: { 'api-key': BREVO_API_KEY, 'Content-Type': 'application/json' }, timeout: 10000 });
   } catch (err) {
@@ -143,13 +151,26 @@ const handleBookingButton = async (phone, payload) => {
   if (!booking) return false;
 
   if (payload === CONFIRM_PAYLOAD) {
-    await Booking.updateOne({ _id: booking._id }, { $set: { 'whatsappBot.customerReply': 'confirm', 'whatsappBot.customerRepliedAt': new Date() } });
-    const ack = L(booking,
-      `Thanks! We've noted your confirmation for booking #${booking.orderNumber}. Our team will confirm it shortly.`,
-      `شكراً لك! سجّلنا تأكيدك لحجزك رقم ${booking.orderNumber}. سيقوم فريقنا بتأكيده قريباً.`);
+    const confirmed = await Booking.findOneAndUpdate(
+      { _id: booking._id, status: 'pending' },
+      {
+        $set: { status: 'confirmed', 'whatsappBot.customerReply': 'confirm', 'whatsappBot.customerRepliedAt': new Date() },
+        $push: { statusHistory: { status: 'confirmed', timestamp: new Date(), note: 'Confirmed by customer via WhatsApp', actorRole: 'customer' } },
+      },
+      { new: true }
+    );
+    if (!confirmed) return true; // already changed (e.g. admin already acted on it) — nothing more to do
+
+    const auto = await autoAssign.autoAssignBooking(confirmed, { fromStatus: 'confirmed' });
+    if (auto) notifyTechnicianJob(auto.technician._id, auto.booking, 'assigned').catch(() => {});
+    const finalBooking = auto ? auto.booking : confirmed;
+
+    const ack = auto
+      ? L(booking, `Thanks! Your booking #${booking.orderNumber} is confirmed and a technician has been assigned.`, `شكراً لك! تم تأكيد حجزك رقم ${booking.orderNumber} وتعيين فني له.`)
+      : L(booking, `Thanks! Your booking #${booking.orderNumber} is confirmed. A technician will be assigned shortly.`, `شكراً لك! تم تأكيد حجزك رقم ${booking.orderNumber}. سيتم تعيين فني له قريباً.`);
     await whatsappCloud.sendTextMessage(phone, ack);
     await logMessage(phone, 'out', ack, { messageType: 'text', sentBy: 'bot' });
-    await notifyAdminBookingReply(booking, { reply: 'confirm' });
+    await notifyAdminBookingReply(finalBooking, { reply: 'confirm', autoAssigned: !!auto });
     return true;
   }
 

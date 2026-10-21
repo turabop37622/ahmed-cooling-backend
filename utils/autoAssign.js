@@ -91,27 +91,33 @@ const findCandidates = async (booking) => {
   });
 };
 
-// Assigns a freshly created pending booking. Returns { booking, technician } or null. Never throws.
-const autoAssignBooking = async (booking) => {
+// Assigns a booking a technician. Returns { booking, technician } or null. Never throws.
+// `fromStatus` lets a caller auto-assign from a status other than the usual fresh 'pending' — e.g.
+// utils/whatsappBookingBot.js re-attempts this from 'confirmed' right after a customer confirms over WhatsApp,
+// since a technician may have become free since the booking was first created.
+const autoAssignBooking = async (booking, { fromStatus = 'pending' } = {}) => {
   try {
-    if (!booking || !booking._id || booking.status !== 'pending' || booking.technician) return null;
+    if (!booking || !booking._id || booking.status !== fromStatus || booking.technician) return null;
     const chosen = pickTechnician(await findCandidates(booking));
     if (!chosen) return null;
     const now = new Date();
-    const updated = await Booking.findOneAndUpdate(
-      { _id: booking._id, status: 'pending', technician: null, deletedAt: null },
-      {
-        $set: { status: 'assigned', technician: chosen.userId, assignedBy: 'auto', assignedAt: now },
-        $push: { statusHistory: { $each: [
+    const statusHistory = fromStatus === 'pending'
+      ? [
           { status: 'confirmed', timestamp: now, note: 'Auto-confirmed (automatic assignment)', actorRole: 'system' },
           { status: 'assigned', timestamp: now, note: `Auto-assigned to ${chosen.user.fullName}`, actorRole: 'system' },
-        ] } },
+        ]
+      : [{ status: 'assigned', timestamp: now, note: `Auto-assigned to ${chosen.user.fullName}`, actorRole: 'system' }];
+    const updated = await Booking.findOneAndUpdate(
+      { _id: booking._id, status: fromStatus, technician: null, deletedAt: null },
+      {
+        $set: { status: 'assigned', technician: chosen.userId, assignedBy: 'auto', assignedAt: now },
+        $push: { statusHistory: { $each: statusHistory } },
       },
       { new: true }
     );
     return updated ? { booking: updated, technician: chosen.user } : null;
   } catch (e) {
-    console.error('⚠️ Auto-assign failed (booking stays pending):', e.message);
+    console.error('⚠️ Auto-assign failed (booking stays at its current status):', e.message);
     return null;
   }
 };
