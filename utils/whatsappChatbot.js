@@ -1,6 +1,7 @@
 // General-purpose WhatsApp FAQ bot: answers free-form customer questions (services, pricing, areas served) using
-// Gemini, and hands off to a human (an admin, via the admin panel's WhatsApp Inbox — see routes/adminWhatsapp.js)
-// the moment a customer asks for one, or when the model itself decides the question needs a person.
+// a Groq-hosted model, and hands off to a human (an admin, via the admin panel's WhatsApp Inbox — see
+// routes/adminWhatsapp.js) the moment a customer asks for one, or when the model itself decides the question
+// needs a person.
 //
 // This never touches booking status — that stays with utils/whatsappBookingBot.js and, ultimately, the admin's
 // own confirm/cancel action in the existing admin bookings panel.
@@ -12,8 +13,8 @@ const { logMessage, setStatus } = require('./whatsappConversationStore');
 let catalogueServices = [];
 try { catalogueServices = require('../web/src/lib/services.json'); } catch { catalogueServices = []; }
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
 const VISIT_CHARGE = (() => {
   const n = Number(process.env.VISIT_CHARGE);
   return Number.isFinite(n) && n >= 0 ? n : 30;
@@ -23,7 +24,7 @@ const SENDER_EMAIL = process.env.EMAIL_FROM || ADMIN_EMAIL;
 const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
 // Keyword-based handoff detection: fast, free, and deterministic for the common ways someone asks for a human,
-// in English, Arabic and Roman Urdu. Gemini can still ask for a handoff itself (see HANDOFF_MARKER below) for
+// in English, Arabic and Roman Urdu. The model can still ask for a handoff itself (see HANDOFF_MARKER below) for
 // cases this list doesn't catch — complaints, price negotiation, anything it isn't confident answering.
 const HANDOFF_RE = /\b(human|real\s*person|speak\s*to\s*(someone|a\s*person)|talk\s*to\s*(someone|a\s*person|a\s*human|your\s*(team|staff|worker|technician))|customer\s*(service|care)\s*(agent|rep)|representative|agent)\b|(شخص\s*حقيقي|موظف|ممثل|أتكلم\s*مع|اتكلم\s*مع|تحويلي|محول)|(\binsaan\b|\bbanda\b|\bworker\s*se\b|\bkisi\s*insan\b|\breal\s*person\b|\binsan\s*se\s*baat\b)/i;
 
@@ -52,24 +53,22 @@ Rules:
 - If the customer is upset, asks for a discount/negotiation, reports a problem with a technician, or asks anything you are not confident answering from the facts above, end your reply with the exact text ${HANDOFF_MARKER} on its own — a human will take over.`;
 };
 
-const callGemini = async (phone, userText) => {
-  if (!GEMINI_API_KEY) return null;
+const callGroq = async (phone, userText) => {
+  if (!GROQ_API_KEY) return null;
   try {
     const { data } = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`,
+      'https://api.groq.com/openai/v1/chat/completions',
       {
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT() }] },
-        contents: [{ role: 'user', parts: [{ text: userText }] }],
-        // thinkingBudget: 0 — a WhatsApp FAQ answer doesn't need extended reasoning, and without this the model's
-        // internal "thinking" tokens can eat the whole maxOutputTokens budget before any reply text is written.
-        generationConfig: { maxOutputTokens: 500, thinkingConfig: { thinkingBudget: 0 } },
+        model: GROQ_MODEL,
+        messages: [{ role: 'system', content: SYSTEM_PROMPT() }, { role: 'user', content: userText }],
+        max_tokens: 500,
       },
-      { params: { key: GEMINI_API_KEY }, headers: { 'Content-Type': 'application/json' }, timeout: 20000 }
+      { headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 20000 }
     );
-    const text = (data.candidates?.[0]?.content?.parts || []).map((p) => p.text || '').join('').trim();
+    const text = (data.choices?.[0]?.message?.content || '').trim();
     return text || null;
   } catch (err) {
-    console.error('❌ Gemini WhatsApp reply failed:', err.response?.data || err.message);
+    console.error('❌ Groq WhatsApp reply failed:', err.response?.data || err.message);
     return null;
   }
 };
@@ -116,8 +115,8 @@ const handleIncomingText = async (phone, text, conversation) => {
     return;
   }
 
-  const reply = await callGemini(phone, text);
-  if (!reply) return; // not configured, or Gemini failed — admin can still see the message in the inbox and reply
+  const reply = await callGroq(phone, text);
+  if (!reply) return; // not configured, or Groq failed — admin can still see the message in the inbox and reply
 
   const handoff = reply.includes(HANDOFF_MARKER);
   const cleanReply = reply.replace(HANDOFF_MARKER, '').trim() || HANDOFF_ACK(looksArabic(text));
