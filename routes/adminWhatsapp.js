@@ -6,8 +6,11 @@ const router = express.Router();
 const auth = require('../middleware/auth');
 const WhatsAppMessage = require('../models/WhatsAppMessage');
 const WhatsAppConversation = require('../models/WhatsAppConversation');
+const User = require('../models/User');
+const Booking = require('../models/Booking');
 const whatsappCloud = require('../utils/whatsappCloud');
 const { logMessage, setStatus } = require('../utils/whatsappConversationStore');
+const { phoneVariants } = require('../utils/phone');
 
 const adminOnly = (req, res, next) => {
   if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only' });
@@ -36,6 +39,25 @@ router.get('/conversations/:phone/messages', auth, adminOnly, async (req, res) =
     res.json({ success: true, messages });
   } catch (err) {
     console.error('❌ Admin WhatsApp messages error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Who this phone number belongs to, if anyone, plus their recent bookings — shown at the top of the admin
+// inbox's conversation view so an admin doesn't have to leave the page to look someone up.
+router.get('/conversations/:phone/customer', auth, adminOnly, async (req, res) => {
+  try {
+    const phone = decodeURIComponent(req.params.phone);
+    const variants = phoneVariants(phone);
+    const user = await User.findOne({ phone: { $in: variants }, role: 'customer' })
+      .select('fullName email phone createdAt authProvider');
+    const bookings = await Booking.find({ phone: { $in: variants }, deletedAt: null })
+      .select('orderNumber bookingId status service serviceDetails date time address city totalAmount createdAt')
+      .sort({ createdAt: -1 })
+      .limit(10);
+    res.json({ success: true, user, bookings });
+  } catch (err) {
+    console.error('❌ Admin WhatsApp customer lookup error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
