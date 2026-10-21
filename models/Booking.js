@@ -261,6 +261,9 @@
       whatsappBot: {
         confirmationSentAt: { type: Date },
         awaitingCancelReason: { type: Boolean, default: false },
+        // Set when the customer confirmed but their saved address doesn't resolve to Jeddah/Makkah — the booking
+        // stays 'pending' and we're waiting on their next message to be a corrected address.
+        awaitingAddressFix: { type: Boolean, default: false },
         customerReply: { type: String, enum: ['confirm', 'cancel'] },
         customerReplyReason: { type: String },
         customerRepliedAt: { type: Date }

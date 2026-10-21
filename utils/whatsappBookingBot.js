@@ -21,6 +21,7 @@ const { escapeHtml } = require('./security');
 const whatsappCloud = require('./whatsappCloud');
 const { logMessage } = require('./whatsappConversationStore');
 const autoAssign = require('./autoAssign');
+const { normalizeCity } = autoAssign;
 const { notifyTechnicianJob } = require('./notify');
 
 const TEMPLATE_NAME = process.env.WHATSAPP_CONFIRM_TEMPLATE_NAME || 'booking_confirmation';
@@ -71,6 +72,44 @@ const notifyAdminBookingReply = async (booking, { reply, reason, autoAssigned })
   }
 };
 
+// Alerts the admin about a booking the bot can't move forward on by itself — an address that isn't recognizably
+// in Jeddah/Makkah, or a phone number WhatsApp can't deliver to at all. Booking stays 'pending' either way.
+const notifyAdminIssue = async (booking, { issue, detail }) => {
+  if (!BREVO_API_KEY || !ADMIN_EMAIL) return;
+  try {
+    await axios.post('https://api.brevo.com/v3/smtp/email', {
+      sender: { name: 'Ahmed Cooling - WhatsApp Bot', email: SENDER_EMAIL },
+      to: [{ email: ADMIN_EMAIL }],
+      subject: `⚠️ Booking ${booking.orderNumber || booking.bookingId}: ${issue}`,
+      htmlContent: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;">
+        <h2 style="color:#D97706;">⚠️ ${escapeHtml(issue)}</h2>
+        <p><strong>Booking:</strong> ${escapeHtml(booking.orderNumber || booking.bookingId || '')}</p>
+        <p><strong>Customer:</strong> ${escapeHtml(booking.customerName || '')} (${escapeHtml(booking.phone || '')})</p>
+        <p><strong>Address on file:</strong> ${escapeHtml(booking.address || '(none)')}</p>
+        ${detail ? `<p>${escapeHtml(detail)}</p>` : ''}
+        <p>The booking is still <strong>pending</strong>. Open the admin panel's <strong>Bookings</strong> page if it needs a manual follow-up.</p>
+      </div>`,
+    }, { headers: { 'api-key': BREVO_API_KEY, 'Content-Type': 'application/json' }, timeout: 10000 });
+  } catch (err) {
+    console.error('❌ Admin issue-alert email failed:', err.response?.data || err.message);
+  }
+};
+
+// Moves a confirmed booking's job forward: tries auto-assign, acks the customer, tells the admin. Shared by the
+// direct "Yes" tap and by handleAddressFixText once a bad address has been corrected.
+const finalizeConfirm = async (confirmed, phone) => {
+  const auto = await autoAssign.autoAssignBooking(confirmed, { fromStatus: 'confirmed' });
+  if (auto) notifyTechnicianJob(auto.technician._id, auto.booking, 'assigned').catch(() => {});
+  const finalBooking = auto ? auto.booking : confirmed;
+
+  const ack = auto
+    ? L(confirmed, `Thanks! Your booking #${confirmed.orderNumber} is confirmed and a technician has been assigned.`, `شكراً لك! تم تأكيد حجزك رقم ${confirmed.orderNumber} وتعيين فني له.`)
+    : L(confirmed, `Thanks! Your booking #${confirmed.orderNumber} is confirmed. A technician will be assigned shortly.`, `شكراً لك! تم تأكيد حجزك رقم ${confirmed.orderNumber}. سيتم تعيين فني له قريباً.`);
+  await whatsappCloud.sendTextMessage(phone, ack);
+  await logMessage(phone, 'out', ack, { messageType: 'text', sentBy: 'bot' });
+  await notifyAdminBookingReply(finalBooking, { reply: 'confirm', autoAssigned: !!auto });
+};
+
 // ============================================
 // OUTGOING: the "please confirm" nudge, 5 min after a booking is created
 // ============================================
@@ -82,7 +121,14 @@ const claimForConfirmationSend = (bookingId) => Booking.findOneAndUpdate(
 );
 
 const sendConfirmationRequest = async (booking) => {
-  if (!canonicalSaudiMobile(booking.phone)) return; // not a number WhatsApp delivery can reach
+  if (!canonicalSaudiMobile(booking.phone)) {
+    // Can't reach this number on WhatsApp at all — the booking would otherwise sit silently pending forever.
+    await notifyAdminIssue(booking, {
+      issue: 'Phone number looks invalid — WhatsApp confirmation could not be sent',
+      detail: 'Please contact the customer directly to confirm the details and the phone number.',
+    });
+    return;
+  }
   const phone = normalizePhone(booking.phone);
   const serviceName = emailServiceName(booking);
   const when = [booking.date, booking.time].filter(Boolean).join(' ') || '—';
@@ -102,6 +148,10 @@ const sendConfirmationRequest = async (booking) => {
     });
   } catch (err) {
     console.error('❌ WhatsApp confirmation request failed for booking', booking.bookingId || booking._id, err.message);
+    await notifyAdminIssue(booking, {
+      issue: 'WhatsApp confirmation message failed to send',
+      detail: 'Meta rejected the message (the number may not be on WhatsApp, or the template needs re-approval) — please contact the customer directly.',
+    });
   }
 };
 
@@ -151,6 +201,23 @@ const handleBookingButton = async (phone, payload) => {
   if (!booking) return false;
 
   if (payload === CONFIRM_PAYLOAD) {
+    // The address on file might be whatever the app/website form had (sometimes incomplete or missing a city) —
+    // check it resolves to Jeddah/Makkah before actually confirming, since that's also what a technician would
+    // need to find the customer. If not, hold the booking and ask for a corrected address instead.
+    if (!normalizeCity(booking.address)) {
+      await Booking.updateOne({ _id: booking._id }, { $set: { 'whatsappBot.awaitingAddressFix': true } });
+      const ask = L(booking,
+        'Before we confirm, your address doesn\'t look complete — could you reply with your full address, including Jeddah or Makkah?',
+        'قبل التأكيد، عنوانك غير واضح بالكامل — ممكن ترسل العنوان الكامل متضمناً جدة أو مكة؟');
+      await whatsappCloud.sendTextMessage(phone, ask);
+      await logMessage(phone, 'out', ask, { messageType: 'text', sentBy: 'bot' });
+      await notifyAdminIssue(booking, {
+        issue: 'Customer confirmed, but the address doesn\'t look complete',
+        detail: 'We asked them to resend a full address (with Jeddah/Makkah) before the booking is confirmed.',
+      });
+      return true;
+    }
+
     const confirmed = await Booking.findOneAndUpdate(
       { _id: booking._id, status: 'pending' },
       {
@@ -160,17 +227,7 @@ const handleBookingButton = async (phone, payload) => {
       { new: true }
     );
     if (!confirmed) return true; // already changed (e.g. admin already acted on it) — nothing more to do
-
-    const auto = await autoAssign.autoAssignBooking(confirmed, { fromStatus: 'confirmed' });
-    if (auto) notifyTechnicianJob(auto.technician._id, auto.booking, 'assigned').catch(() => {});
-    const finalBooking = auto ? auto.booking : confirmed;
-
-    const ack = auto
-      ? L(booking, `Thanks! Your booking #${booking.orderNumber} is confirmed and a technician has been assigned.`, `شكراً لك! تم تأكيد حجزك رقم ${booking.orderNumber} وتعيين فني له.`)
-      : L(booking, `Thanks! Your booking #${booking.orderNumber} is confirmed. A technician will be assigned shortly.`, `شكراً لك! تم تأكيد حجزك رقم ${booking.orderNumber}. سيتم تعيين فني له قريباً.`);
-    await whatsappCloud.sendTextMessage(phone, ack);
-    await logMessage(phone, 'out', ack, { messageType: 'text', sentBy: 'bot' });
-    await notifyAdminBookingReply(finalBooking, { reply: 'confirm', autoAssigned: !!auto });
+    await finalizeConfirm(confirmed, phone);
     return true;
   }
 
@@ -208,4 +265,39 @@ const handleBookingReasonText = async (phone, text) => {
   return true;
 };
 
-module.exports = { startScheduler, tick, handleBookingButton, handleBookingReasonText };
+// Called by routes/whatsappWebhook.js for a plain text reply. Returns true if this phone had an open "please
+// resend a full address" question outstanding (see handleBookingButton above).
+const handleAddressFixText = async (phone, text) => {
+  const booking = await findAwaitingBooking(phone, { 'whatsappBot.awaitingAddressFix': true });
+  if (!booking) return false;
+
+  const address = String(text || '').trim().slice(0, 300);
+  const city = normalizeCity(address);
+  if (address.length < 12 || !/\s/.test(address) || !city) {
+    const ask = L(booking,
+      'That still doesn\'t look complete — please include the area, street, building/landmark, and Jeddah or Makkah.',
+      'ما زال العنوان غير واضح — الرجاء ذكر الحي والشارع والمبنى، مع جدة أو مكة.');
+    await whatsappCloud.sendTextMessage(phone, ask);
+    await logMessage(phone, 'out', ask, { messageType: 'text', sentBy: 'bot' });
+    return true;
+  }
+
+  const confirmed = await Booking.findOneAndUpdate(
+    { _id: booking._id, status: 'pending' },
+    {
+      $set: {
+        status: 'confirmed', address, city,
+        'whatsappBot.awaitingAddressFix': false,
+        'whatsappBot.customerReply': 'confirm',
+        'whatsappBot.customerRepliedAt': new Date(),
+      },
+      $push: { statusHistory: { status: 'confirmed', timestamp: new Date(), note: 'Confirmed by customer via WhatsApp (address corrected)', actorRole: 'customer' } },
+    },
+    { new: true }
+  );
+  if (!confirmed) return true;
+  await finalizeConfirm(confirmed, phone);
+  return true;
+};
+
+module.exports = { startScheduler, tick, handleBookingButton, handleBookingReasonText, handleAddressFixText };
