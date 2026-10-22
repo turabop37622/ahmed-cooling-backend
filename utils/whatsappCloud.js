@@ -105,4 +105,16 @@ const probe = async () => {
   }
 };
 
-module.exports = { isConfigured, probe, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, toWaId };
+// Shows a one-tap "Send location" button; the customer's reply arrives as an ordinary location message.
+const sendLocationRequest = (to, bodyText) => post({
+  messaging_product: 'whatsapp',
+  to: toWaId(to),
+  type: 'interactive',
+  interactive: {
+    type: 'location_request_message',
+    body: { text: bodyText },
+    action: { name: 'send_location' },
+  },
+});
+
+module.exports = { isConfigured, probe, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, sendLocationRequest, toWaId };

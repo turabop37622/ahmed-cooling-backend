@@ -13,7 +13,7 @@ const axios = require('axios');
 const Service = require('../models/Service');
 const faq = require('./whatsappFaq');
 const WhatsAppConversation = require('../models/WhatsAppConversation');
-const { sendTextMessage, sendButtonsMessage, sendListMessage } = require('./whatsappCloud');
+const { sendTextMessage, sendButtonsMessage, sendListMessage, sendLocationRequest } = require('./whatsappCloud');
 const { logMessage } = require('./whatsappConversationStore');
 const { isBookableDate, isIsoDate, riyadhDate, addDays, normalizeTime, RIYADH_OFFSET_MS } = require('./schedule');
 const { normalizeCity } = require('./autoAssign');
@@ -237,9 +237,15 @@ const promptStep = async (phone, draft, isAr) => {
   else if (draft.step === 'date') await replyDateList(phone, isAr);
   else if (draft.step === 'time') await replyTimeList(phone, isAr, draft.date);
   else if (draft.step === 'address') {
-    await reply(phone, L(isAr,
-      'What is the full address for the visit? (area, street and building/landmark)\nTip: you can also share your location with the attach (📎) button > Location.',
-      'ما هو العنوان الكامل للزيارة؟ (الحي والشارع والمبنى أو أقرب معلم)\nيمكنك أيضاً مشاركة موقعك من زر المرفقات (📎) ثم الموقع.'));
+    const body = L(isAr,
+      'Where should the technician come? Tap the button to send your current location, or just type the address (area, street and building/landmark).',
+      'أين يجب أن يأتي الفني؟ اضغط الزر لإرسال موقعك الحالي، أو اكتب العنوان (الحي والشارع والمبنى أو أقرب معلم).');
+    try {
+      await sendLocationRequest(phone, body);
+      await logMessage(phone, 'out', body + ' [send location button]', { messageType: 'button', sentBy: 'bot' });
+    } catch (err) {
+      await reply(phone, body);
+    }
   } else if (draft.step === 'confirm') await replyConfirm(phone, draft, isAr);
 };
 
