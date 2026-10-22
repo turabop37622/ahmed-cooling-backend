@@ -10,6 +10,12 @@ const whatsAppConversationSchema = new mongoose.Schema({
   lastMessagePreview: { type: String, default: '' },
   lastMessageAt: { type: Date, default: Date.now },
   lastDirection: { type: String, enum: ['in', 'out'] },
+  // The language the customer picked from the welcome buttons (utils/whatsappMenu.js) — every bot reply that has
+  // an English and an Arabic version uses this one. Unset until they choose (or until we detect it from what they type).
+  language: { type: String, enum: ['en', 'ar'] },
+  languagePromptedAt: { type: Date },
+  // A real first question typed before they picked a language — answered right after they choose, so it isn't lost.
+  pendingText: { type: String },
   // In-progress "book a service over WhatsApp" conversation (utils/whatsappBookingFlow.js). Unset once the
   // booking is created or the customer cancels/abandons it.
   bookingDraft: {

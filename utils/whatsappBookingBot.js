@@ -265,6 +265,20 @@ const handleBookingReasonText = async (phone, text) => {
   return true;
 };
 
+const TYPED_YES_RE = /^(yes|y|yeah|yep|confirm|confirmed|ok|okay|haan|han|ji|نعم|ايوه|أيوه|اكيد|أكيد|تمام|موافق)[\s.!؟?]*$/i;
+const TYPED_NO_RE = /^(no|n|nope|cancel|nahi|nahin|لا|الغاء|إلغاء)[\s.!؟?]*$/i;
+
+// A customer who TYPES "yes"/"no" to the confirmation nudge instead of tapping its button: if they have a booking
+// waiting for exactly that answer, treat it as the tap. Returns true if it did.
+const handleTypedReply = async (phone, text) => {
+  const t = String(text || '').trim();
+  const isYes = TYPED_YES_RE.test(t);
+  if (!isYes && !TYPED_NO_RE.test(t)) return false;
+  const waiting = await findAwaitingBooking(phone, { 'whatsappBot.customerReply': { $exists: false } });
+  if (!waiting) return false;
+  return handleBookingButton(phone, isYes ? CONFIRM_PAYLOAD : CANCEL_PAYLOAD);
+};
+
 // Called by routes/whatsappWebhook.js for a plain text reply. Returns true if this phone had an open "please
 // resend a full address" question outstanding (see handleBookingButton above).
 const handleAddressFixText = async (phone, text) => {
@@ -300,4 +314,4 @@ const handleAddressFixText = async (phone, text) => {
   return true;
 };
 
-module.exports = { startScheduler, tick, handleBookingButton, handleBookingReasonText, handleAddressFixText };
+module.exports = { startScheduler, tick, handleBookingButton, handleBookingReasonText, handleAddressFixText, handleTypedReply };

@@ -28,4 +28,16 @@ const setStatus = (phone, status) => WhatsAppConversation.findOneAndUpdate(
   { upsert: true, new: true }
 );
 
-module.exports = { logMessage, getConversation, setStatus };
+const setLanguage = (phone, language) => WhatsAppConversation.findOneAndUpdate(
+  { phone },
+  { $set: { language }, $setOnInsert: { phone } },
+  { upsert: true, new: true }
+);
+
+const markLanguagePrompted = (phone) => WhatsAppConversation.findOneAndUpdate(
+  { phone },
+  { $set: { languagePromptedAt: new Date() }, $setOnInsert: { phone } },
+  { upsert: true, new: true }
+);
+
+module.exports = { logMessage, getConversation, setStatus, setLanguage, markLanguagePrompted };

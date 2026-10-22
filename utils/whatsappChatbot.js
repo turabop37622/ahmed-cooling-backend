@@ -7,7 +7,7 @@
 // own confirm/cancel action in the existing admin bookings panel.
 const axios = require('axios');
 const { escapeHtml } = require('./security');
-const { sendTextMessage } = require('./whatsappCloud');
+const { sendTextMessage, sendButtonsMessage } = require('./whatsappCloud');
 const { logMessage, setStatus } = require('./whatsappConversationStore');
 
 let catalogueServices = [];
@@ -41,7 +41,7 @@ Facts you can rely on:
 - Areas served: Jeddah and Makkah only (not other cities).
 - A technician visit fee of SAR ${VISIT_CHARGE} applies in addition to the service price; the customer pays only after the service is done.
 - Emergency support line runs 24/7.
-- A customer can book a service right here on WhatsApp — if they want to book, tell them to reply with something like "I want to book a service" to start; a separate step-by-step flow handles it, not you. They can also book through the Ahmed Cooling app or website.
+- A customer can book a service right here on WhatsApp — if they want to book, tell them to send "menu" and tap "Book a service" (or say "I want to book a service"); a separate step-by-step flow handles it, not you. They can also book through the Ahmed Cooling app or website.
 - You cannot create, change, or look up a specific existing booking yourself — only the step-by-step WhatsApp booking flow, the app, or the website can.
 - Services offered (price is a starting price — final price is confirmed after inspection):
 ${lines}
@@ -54,24 +54,40 @@ Rules:
 - If the customer is upset, asks for a discount/negotiation, reports a problem with a technician, or asks anything you are not confident answering from the facts above, end your reply with the exact text ${HANDOFF_MARKER} on its own — a human will take over.`;
 };
 
-const callGroq = async (phone, userText) => {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// One retry on a rate limit / server error — Groq's free tier answers 429 under bursts, and that used to mean the
+// customer got no reply at all.
+const callGroq = async (phone, userText, language) => {
   if (!GROQ_API_KEY) return null;
-  try {
-    const { data } = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: GROQ_MODEL,
-        messages: [{ role: 'system', content: SYSTEM_PROMPT() }, { role: 'user', content: userText }],
-        max_tokens: 500,
-      },
-      { headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 20000 }
-    );
-    const text = (data.choices?.[0]?.message?.content || '').trim();
-    return text || null;
-  } catch (err) {
-    console.error('❌ Groq WhatsApp reply failed:', err.response?.data || err.message);
-    return null;
+  const langHint = language === 'ar'
+    ? '\nThe customer chose Arabic as their language: answer in Arabic unless they clearly write in another language.'
+    : language === 'en'
+      ? '\nThe customer chose English as their language: answer in English unless they clearly write in another language.'
+      : '';
+  const request = () => axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      model: GROQ_MODEL,
+      messages: [{ role: 'system', content: SYSTEM_PROMPT() + langHint }, { role: 'user', content: userText }],
+      max_tokens: 500,
+    },
+    { headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+  );
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const { data } = await request();
+      const text = (data.choices?.[0]?.message?.content || '').trim();
+      return text || null;
+    } catch (err) {
+      const status = err.response?.status;
+      const retryable = !status || status === 429 || status >= 500;
+      console.error(`❌ Groq WhatsApp reply failed (attempt ${attempt}):`, err.response?.data || err.message);
+      if (!retryable || attempt === 2) return null;
+      await sleep(900);
+    }
   }
+  return null;
 };
 
 const HANDOFF_ACK = (isArabic) => isArabic
@@ -101,26 +117,56 @@ const notifyAdminHandoff = async (phone, customerName, lastMessage) => {
 // Looks Arabic-script to pick the right acknowledgement language (crude but good enough for a canned line).
 const looksArabic = (text) => /[؀-ۿ]/.test(text);
 
-// Entry point for the webhook: a free-form text message on a conversation that the booking-confirmation flow
-// did not claim (see routes/whatsappWebhook.js). `conversation` is the WhatsAppConversation doc, already
-// up to date with this inbound message.
+const isHandoffRequest = (text) => HANDOFF_RE.test(text);
+
+// Hands the conversation to a person: the bot goes quiet until an admin replies from the admin panel's WhatsApp
+// Inbox (routes/adminWhatsapp.js), and the admin gets an email. `language` is 'en' | 'ar' (the customer's choice).
+const requestHuman = async (phone, text, conversation, language) => {
+  const isAr = language ? language === 'ar' : looksArabic(text);
+  await setStatus(phone, 'needs_human');
+  const ack = HANDOFF_ACK(isAr);
+  await sendTextMessage(phone, ack);
+  await logMessage(phone, 'out', ack, { messageType: 'text', sentBy: 'bot' });
+  await notifyAdminHandoff(phone, conversation?.customerName, text);
+};
+
+// What the customer gets when the AI can't answer (not configured, rate-limited, down): never silence.
+const sendTroubleReply = async (phone, isAr) => {
+  const body = isAr
+    ? 'عذراً، لم أستطع معالجة رسالتك الآن. اختر من الأزرار أدناه أو أعد المحاولة بعد قليل.'
+    : 'Sorry, I couldn\'t process that just now. Pick an option below, or try again in a moment.';
+  const buttons = [
+    { id: 'menu_main', title: isAr ? 'القائمة الرئيسية' : 'Main menu' },
+    { id: 'menu_human', title: isAr ? 'تحدث مع فريقنا' : 'Talk to our team' },
+  ];
+  try {
+    await sendButtonsMessage(phone, body, buttons);
+  } catch {
+    await sendTextMessage(phone, body);
+  }
+  await logMessage(phone, 'out', `${body} [${buttons.map((b) => b.title).join(' / ')}]`, { messageType: 'button', sentBy: 'bot' });
+};
+
+// Fallback for anything the menu and the instant FAQ answers (utils/whatsappMenu.js) didn't handle: ask the AI.
+// `conversation` is the WhatsAppConversation doc, already up to date with this inbound message.
 const handleIncomingText = async (phone, text, conversation) => {
   if (conversation && conversation.status !== 'bot') return; // an admin owns this conversation now — stay quiet
+  const language = conversation?.language;
+  const isAr = language ? language === 'ar' : looksArabic(text);
 
-  if (HANDOFF_RE.test(text)) {
-    await setStatus(phone, 'needs_human');
-    const ack = HANDOFF_ACK(looksArabic(text));
-    await sendTextMessage(phone, ack);
-    await logMessage(phone, 'out', ack, { messageType: 'text', sentBy: 'bot' });
-    await notifyAdminHandoff(phone, conversation?.customerName, text);
+  if (isHandoffRequest(text)) {
+    await requestHuman(phone, text, conversation, language);
     return;
   }
 
-  const reply = await callGroq(phone, text);
-  if (!reply) return; // not configured, or Groq failed — admin can still see the message in the inbox and reply
+  const reply = await callGroq(phone, text, language);
+  if (!reply) {
+    await sendTroubleReply(phone, isAr);
+    return;
+  }
 
   const handoff = reply.includes(HANDOFF_MARKER);
-  const cleanReply = reply.replace(HANDOFF_MARKER, '').trim() || HANDOFF_ACK(looksArabic(text));
+  const cleanReply = reply.replace(HANDOFF_MARKER, '').trim() || HANDOFF_ACK(isAr);
 
   await sendTextMessage(phone, cleanReply);
   await logMessage(phone, 'out', cleanReply, { messageType: 'text', sentBy: 'bot' });
@@ -131,4 +177,4 @@ const handleIncomingText = async (phone, text, conversation) => {
   }
 };
 
-module.exports = { handleIncomingText, notifyAdminHandoff };
+module.exports = { handleIncomingText, notifyAdminHandoff, isHandoffRequest, requestHuman, sendTroubleReply };

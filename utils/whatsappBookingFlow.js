@@ -57,7 +57,7 @@ const replyServiceList = async (phone, isAr) => {
   const rows = LIST_SERVICES.map((s, i) => ({
     id: `svc_${i}`,
     title: isAr && s.nameAr ? s.nameAr : s.name,
-    description: `${L(isAr, 'From', 'يبدأ من')} SAR ${s.basePrice}`,
+    description: L(isAr, `From SAR ${s.basePrice}`, `يبدأ من ${s.basePrice} ريال`),
   }));
   await sendListMessage(phone, bodyText, L(isAr, 'View services', 'عرض الخدمات'), [{ rows }]);
   await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
@@ -116,8 +116,22 @@ const loosenTime = (text) => {
 // it handled the message (started the flow, or is mid-flow and advanced/re-asked a step), false if this message
 // is unrelated and should go to the general FAQ bot instead.
 // `input` is either plain typed text, or the `id` of a tapped list row / reply button (see routes/whatsappWebhook.js).
+const isArabicFor = (conversation, input) => (conversation?.language
+  ? conversation.language === 'ar'
+  : conversation?.customerName ? looksArabic(conversation.customerName) : looksArabic(input));
+
+// Begins a fresh booking chat (the menu's "Book a service" button, or a typed booking request).
+const startFlow = async (phone, isAr) => {
+  if (!LIST_SERVICES.length) {
+    await reply(phone, L(isAr, 'Sorry, bookings aren\'t available right now — please use our app or website.', 'عذراً، الحجز غير متاح الآن — الرجاء استخدام التطبيق أو الموقع.'));
+    return;
+  }
+  await setDraft(phone, { step: 'service' });
+  await replyServiceList(phone, isAr);
+};
+
 const handleMessage = async (phone, input, conversation) => {
-  const isAr = conversation?.customerName ? looksArabic(conversation.customerName) : looksArabic(input);
+  const isAr = isArabicFor(conversation, input);
   const draft = conversation?.bookingDraft;
 
   if (draft?.step) {
@@ -132,13 +146,7 @@ const handleMessage = async (phone, input, conversation) => {
 
   if (!BOOKING_INTENT_RE.test(input)) return false;
 
-  if (!LIST_SERVICES.length) {
-    await reply(phone, L(isAr, 'Sorry, bookings aren\'t available right now — please use our app or website.', 'عذراً، الحجز غير متاح الآن — الرجاء استخدام التطبيق أو الموقع.'));
-    return true;
-  }
-
-  await setDraft(phone, { step: 'service' });
-  await replyServiceList(phone, isAr);
+  await startFlow(phone, isAr);
   return true;
 };
 
@@ -278,4 +286,6 @@ const createFromDraft = async (phone, draft, isAr) => {
   }
 };
 
-module.exports = { handleMessage };
+const clearDraft = (phone) => setDraft(phone, null);
+
+module.exports = { handleMessage, startFlow, clearDraft };
