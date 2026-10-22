@@ -26,6 +26,10 @@ const whatsAppConversationSchema = new mongoose.Schema({
     date: String,
     time: String,
     address: String,
+    latitude: Number,
+    longitude: Number,
+    // Drafts left untouched for a few hours are dropped so an old half-finished booking never hijacks a new chat.
+    updatedAt: Date,
   },
 }, { timestamps: true });
 

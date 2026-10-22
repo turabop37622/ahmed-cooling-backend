@@ -1030,7 +1030,7 @@ router.post('/public', auth, createLimiter, [
 // phone+OTP login path (authProvider: 'phone') already used elsewhere in this app.
 // `serviceRecord` must already be a loaded, active Service document or catalogue package (the caller is
 // responsible for resolving whichever one the customer picked, since WhatsApp has no id-aware input widget).
-const createBookingForPhone = async ({ customerName, phone, serviceRecord, date, time, address, language }) => {
+const createBookingForPhone = async ({ customerName, phone, serviceRecord, date, time, address, language, coordinates }) => {
   const normalizedPhone = normalizePhone(phone);
   const packageRecord = CATALOGUE_PACKAGES.find((item) => item._id === String(serviceRecord._id)) || null;
 
@@ -1067,7 +1067,7 @@ const createBookingForPhone = async ({ customerName, phone, serviceRecord, date,
     city: autoAssign.normalizeCity(address) || '',
     country: detectedCountry,
     currency: detectedCurrency,
-    coordinates: { latitude: 0, longitude: 0 },
+    coordinates: Number.isFinite(coordinates?.latitude) && Number.isFinite(coordinates?.longitude) ? coordinates : { latitude: 0, longitude: 0 },
     platform: 'web',
     language: language === 'ar' ? 'ar' : 'en',
     status: 'pending',

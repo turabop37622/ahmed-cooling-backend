@@ -93,6 +93,12 @@ const handleMessage = async (message, waId, customerName) => {
 
   if (conversation?.status !== 'bot') return; // a person has taken over this conversation — the bot stays quiet
 
+  if (conversation.bookingDraft?.step && bookingFlow.isDraftStale(conversation.bookingDraft)) {
+    await bookingFlow.clearDraft(phone);
+    conversation.bookingDraft = undefined;
+  }
+  if (message.type === 'location' && await bookingFlow.handleLocation(phone, message.location, conversation)) return;
+
   if (UNSUPPORTED_TYPES.has(message.type)) { await menu.handleUnsupported(phone, conversation); return; }
 
   const input = id || (isText ? text : null);
@@ -133,8 +139,14 @@ const handleInterruption = async (phone, text, conversation) => {
     return menu.handle(phone, text, conversation);
   }
 
-  const asksQuestion = /[?؟]/.test(text) || tokens.length <= 6;
-  if (asksQuestion && faq.matchIntent(norm) && await menu.handle(phone, text, conversation)) {
+  const hasQuestionMark = /[?؟]/.test(text);
+  if ((hasQuestionMark || tokens.length <= 6) && faq.matchIntent(norm) && await menu.handle(phone, text, conversation)) {
+    await bookingFlow.resume(phone, isAr);
+    return true;
+  }
+  // Some other question the canned answers don't cover ("do you fix Samsung ACs?") — let the AI answer, then carry on.
+  if (hasQuestionMark && tokens.length > 2) {
+    await chatbot.handleIncomingText(phone, text, conversation);
     await bookingFlow.resume(phone, isAr);
     return true;
   }

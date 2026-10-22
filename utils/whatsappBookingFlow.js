@@ -9,7 +9,9 @@
 //
 // Reuses the real booking-creation logic (routes/bookings.js: createBookingForPhone) — same pricing, emails,
 // auto-assignment and admin notification as a booking made in the app.
+const axios = require('axios');
 const Service = require('../models/Service');
+const faq = require('./whatsappFaq');
 const WhatsAppConversation = require('../models/WhatsAppConversation');
 const { sendTextMessage, sendButtonsMessage, sendListMessage } = require('./whatsappCloud');
 const { logMessage } = require('./whatsappConversationStore');
@@ -32,13 +34,18 @@ const BOOKING_INTENT_RE = /\b(book|booking|schedule|appointment)\b|(احجز|ح�
 const CANCEL_RE = /\b(cancel|stop|nevermind|never mind)\b|(الغاء|إلغاء|لا أريد)|(\bcancel\s*kar\b|\brehnay\s*do\b)/i;
 const looksArabic = (text) => /[؀-ۿ]/.test(text);
 
+// Arabic-Indic / Persian digits -> ASCII, so "٣٠" or "٤ م" parse like "30" / "4 pm".
+const asciiDigits = (text) => text
+  .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+  .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+
 const L = (isAr, en, ar) => (isAr ? ar : en);
 
 const draftStatus = (phone) => WhatsAppConversation.findOne({ phone }).select('bookingDraft customerName language');
 
 const setDraft = (phone, draft) => WhatsAppConversation.findOneAndUpdate(
   { phone },
-  draft ? { $set: { bookingDraft: draft } } : { $unset: { bookingDraft: 1 } },
+  draft ? { $set: { bookingDraft: { ...draft, updatedAt: new Date() } } } : { $unset: { bookingDraft: 1 } },
   { upsert: true, new: true }
 );
 
@@ -162,9 +169,18 @@ const parseDate = (text) => {
 
 // "1pm", "1 pm", "10am" (hour only, no minutes) -> "1:00 PM" / "10:00 AM" so schedule.js's normalizeTime accepts it.
 const loosenTime = (text) => {
-  const m = /^(\d{1,2})\s*([ap])\.?\s*m\.?$/i.exec(text.trim());
-  return m ? `${m[1]}:00 ${m[2].toUpperCase()}M` : text;
+  const t = text.trim().replace(/\s*ص(باحا[ًا]?)?$/, ' AM').replace(/\s*م(ساء[ًا]?)?$/, ' PM');
+  const hourOnly = /^(\d{1,2})\s*([ap])\.?\s*m\.?$/i.exec(t);
+  if (hourOnly) return `${hourOnly[1]}:00 ${hourOnly[2].toUpperCase()}M`;
+  return t.replace(/^(\d{1,2}:\d{2})\s*([ap])\.?\s*m\.?$/i, (all, hm, ap) => `${hm} ${ap.toUpperCase()}M`);
 };
+
+// "morning" / "evening"... -> the nearest list slot, so a typed answer still lands on a real choice.
+const PART_OF_DAY = [
+  [/morning|صباح/i, '10:00 AM'], [/noon|midday|ظهر/i, '12:00 PM'],
+  [/afternoon|عصر/i, '02:00 PM'], [/evening|مساء/i, '06:00 PM'], [/night|ليل/i, '08:00 PM'],
+];
+const partOfDay = (text) => (PART_OF_DAY.find(([re]) => re.test(text)) || [])[1] || null;
 
 // Starts the flow if the message looks like a booking request and none is already in progress. Returns true if
 // it handled the message (started the flow, or is mid-flow and advanced/re-asked a step), false if this message
@@ -204,11 +220,65 @@ const handleMessage = async (phone, input, conversation) => {
   return true;
 };
 
-const advanceDraft = async (phone, input, draft, isAr) => {
+const BACK_RE = /^(back|go back|previous|رجوع|السابق|ارجع)$/i;
+const STEP_ORDER = ['service', 'date', 'time', 'address', 'confirm'];
+const PREVIOUS_STEP = { date: 'service', time: 'date', address: 'time', confirm: 'address' };
+// "change the time" / "غير التاريخ" -> jump straight back to that step without restarting.
+const CHANGE_RE = [
+  ['service', /\b(change|edit|wrong)\b.*\b(service)\b|(غير|تغيير|تعديل).*(الخدمة)/i],
+  ['date', /\b(change|edit|wrong)\b.*\b(date|day)\b|(غير|تغيير|تعديل).*(التاريخ|اليوم)/i],
+  ['time', /\b(change|edit|wrong)\b.*\b(time)\b|(غير|تغيير|تعديل).*(الوقت)/i],
+  ['address', /\b(change|edit|wrong)\b.*\b(address|location)\b|(غير|تغيير|تعديل).*(العنوان|الموقع)/i],
+];
+
+// Re-sends the question for whatever step the draft is on.
+const promptStep = async (phone, draft, isAr) => {
+  if (draft.step === 'service') await replyServiceList(phone, isAr);
+  else if (draft.step === 'date') await replyDateList(phone, isAr);
+  else if (draft.step === 'time') await replyTimeList(phone, isAr, draft.date);
+  else if (draft.step === 'address') {
+    await reply(phone, L(isAr,
+      'What is the full address for the visit? (area, street and building/landmark)\nTip: you can also share your location with the attach (📎) button > Location.',
+      'ما هو العنوان الكامل للزيارة؟ (الحي والشارع والمبنى أو أقرب معلم)\nيمكنك أيضاً مشاركة موقعك من زر المرفقات (📎) ثم الموقع.'));
+  } else if (draft.step === 'confirm') await replyConfirm(phone, draft, isAr);
+};
+
+const goToStep = async (phone, draft, step, isAr) => {
+  const next = { ...draft, step };
+  await setDraft(phone, next);
+  await promptStep(phone, next, isAr);
+};
+
+const advanceDraft = async (phone, rawInput, draft, isAr) => {
+  const input = asciiDigits(rawInput);
+
+  // A tap on an old list/button from an earlier step (or a stale confirm) — just ask the current question again.
+  const tappedStep = /^svc_/.test(input) ? 'service' : /^date_/.test(input) ? 'date' : /^time_/.test(input) ? 'time' : /^confirm_/.test(input) ? 'confirm' : null;
+  if (tappedStep && tappedStep !== draft.step) {
+    await promptStep(phone, draft, isAr);
+    return;
+  }
+  if (!tappedStep) {
+    const t = input.trim();
+    if (BACK_RE.test(t) && PREVIOUS_STEP[draft.step]) {
+      await goToStep(phone, draft, PREVIOUS_STEP[draft.step], isAr);
+      return;
+    }
+    const change = CHANGE_RE.find(([, re]) => re.test(t));
+    // Only to a step already answered — jumping ahead would skip questions.
+    if (change && STEP_ORDER.indexOf(change[0]) < STEP_ORDER.indexOf(draft.step)) {
+      await goToStep(phone, draft, change[0], isAr);
+      return;
+    }
+  }
+
   if (draft.step === 'service') {
     const m = /^svc_(\d+)$/.exec(input);
     const index = m ? Number(m[1]) : (Number.isInteger(parseInt(input.trim(), 10)) ? parseInt(input.trim(), 10) - 1 : NaN);
-    const item = LIST_SERVICES[index];
+    // Also accept the service typed by name ("AC repair", "غسالة") — the first catalogue match that is in the list.
+    const byName = m || Number.isInteger(parseInt(input.trim(), 10)) ? null
+      : faq.findServices(faq.normalize(input)).find((s) => LIST_SERVICES.some((l) => String(l._id) === String(s._id)));
+    const item = byName ? LIST_SERVICES.find((l) => String(l._id) === String(byName._id)) : LIST_SERVICES[index];
     if (!item) {
       await reply(phone, L(isAr, 'Please pick a service from the list above.', 'الرجاء اختيار خدمة من القائمة أعلاه.'));
       await replyServiceList(phone, isAr);
@@ -251,7 +321,7 @@ const advanceDraft = async (phone, input, draft, isAr) => {
     const slot = /^time_(\d{2})(\d{2})([AP])M$/.exec(input);
     const time = input === 'time_anytime' ? 'Anytime'
       : slot ? `${slot[1]}:${slot[2]} ${slot[3]}M`
-        : normalizeTime(loosenTime(input.trim())) || (/anytime|أي\s*وقت/i.test(input) ? 'Anytime' : null);
+        : normalizeTime(loosenTime(input.trim())) || (/any\s*time|أي\s*وقت|اي\s*وقت|مهما/i.test(input) ? 'Anytime' : partOfDay(input));
     if (!time) {
       await reply(phone, L(isAr,
         'I didn\'t understand that time — please pick one from the list, or type something like "3:30 PM".',
@@ -259,8 +329,9 @@ const advanceDraft = async (phone, input, draft, isAr) => {
       await replyTimeList(phone, isAr, draft.date);
       return;
     }
-    await setDraft(phone, { ...draft, step: 'address', time });
-    await reply(phone, L(isAr, 'What is the full address for the visit? (area, street and building/landmark)', 'ما هو العنوان الكامل للزيارة؟ (الحي والشارع والمبنى أو أقرب معلم)'));
+    const next = { ...draft, step: 'address', time };
+    await setDraft(phone, next);
+    await promptStep(phone, next, isAr);
     return;
   }
 
@@ -278,7 +349,7 @@ const advanceDraft = async (phone, input, draft, isAr) => {
         'نقدم خدماتنا في جدة ومكة فقط — الرجاء ذكر اسم المدينة ضمن العنوان (مثال: "...، جدة").'));
       return;
     }
-    const confirmed = { ...draft, step: 'confirm', address };
+    const confirmed = { ...draft, step: 'confirm', address, latitude: null, longitude: null };
     await setDraft(phone, confirmed);
     await replyConfirm(phone, confirmed, isAr);
     return;
@@ -327,6 +398,8 @@ const createFromDraft = async (phone, draft, isAr) => {
       time: draft.time,
       address: draft.address,
       language: isAr ? 'ar' : 'en',
+      coordinates: Number.isFinite(draft.latitude) && Number.isFinite(draft.longitude)
+        ? { latitude: draft.latitude, longitude: draft.longitude } : undefined,
     });
 
     await setDraft(phone, null);
@@ -350,11 +423,60 @@ const resume = async (phone, isAr) => {
   const draft = conversation?.bookingDraft;
   if (!draft?.step) return;
   await reply(phone, L(isAr, 'Let\'s continue your booking:', 'لنكمل حجزك:'));
-  if (draft.step === 'service') await replyServiceList(phone, isAr);
-  else if (draft.step === 'date') await replyDateList(phone, isAr);
-  else if (draft.step === 'time') await replyTimeList(phone, isAr, draft.date);
-  else if (draft.step === 'address') await reply(phone, L(isAr, 'What is the full address for the visit? (area, street and building/landmark)', 'ما هو العنوان الكامل للزيارة؟ (الحي والشارع والمبنى أو أقرب معلم)'));
-  else if (draft.step === 'confirm') await replyConfirm(phone, draft, isAr);
+  await promptStep(phone, draft, isAr);
 };
 
-module.exports = { handleMessage, startFlow, clearDraft, resume };
+// Greater Jeddah / Makkah bounding boxes — used when a shared pin can't be named by the geocoder.
+const cityFromCoords = (lat, lng) => {
+  if (lat >= 21.2 && lat <= 21.95 && lng >= 38.95 && lng <= 39.5) return 'Jeddah';
+  if (lat >= 21.2 && lat <= 21.6 && lng >= 39.6 && lng <= 40.1) return 'Makkah';
+  return null;
+};
+
+const reverseGeocode = async (lat, lng, lang) => {
+  try {
+    const { data } = await axios.get(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&accept-language=${lang}`, {
+      timeout: 6000,
+      headers: { 'User-Agent': 'AhmedCoolingWorkshop/1.0' },
+    });
+    const a = data?.address || {};
+    const parts = [a.road || a.pedestrian || a.street, a.neighbourhood || a.suburb || a.quarter, a.city || a.town].filter(Boolean);
+    return parts.length ? parts.join(', ') : '';
+  } catch {
+    return '';
+  }
+};
+
+// A WhatsApp location pin sent while we're asking for the address. Returns true if it was used (or refused here).
+const handleLocation = async (phone, location, conversation) => {
+  const draft = conversation?.bookingDraft;
+  if (draft?.step !== 'address') return false;
+  const isAr = isArabicFor(conversation, '');
+  const lat = Number(location?.latitude);
+  const lng = Number(location?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return false;
+
+  const named = [location.name, location.address].filter((v) => typeof v === 'string' && v.trim()).map((v) => v.trim());
+  const geocoded = await reverseGeocode(lat, lng, 'en');
+  let address = [...named, geocoded].filter(Boolean).join(', ').slice(0, 300);
+  const city = normalizeCity(address) ? null : cityFromCoords(lat, lng);
+  if (!normalizeCity(address) && !city) {
+    await reply(phone, L(isAr,
+      'That pin is outside Jeddah and Makkah, where we work. Please share a location there, or type your address.',
+      'هذا الموقع خارج جدة ومكة حيث نعمل. الرجاء مشاركة موقع داخلهما أو كتابة العنوان.'));
+    return true;
+  }
+  if (city) address = [address, city].filter(Boolean).join(', ');
+  if (address.length < 12) address = `${address || 'Pinned location'} (${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+
+  const confirmed = { ...draft, step: 'confirm', address, latitude: lat, longitude: lng };
+  await setDraft(phone, confirmed);
+  await replyConfirm(phone, confirmed, isAr);
+  return true;
+};
+
+// The draft is dropped if the customer went quiet for a few hours — a stale half-booking must not swallow a new chat.
+const DRAFT_TTL_MS = 3 * 60 * 60 * 1000;
+const isDraftStale = (draft) => !draft?.updatedAt || Date.now() - new Date(draft.updatedAt).getTime() > DRAFT_TTL_MS;
+
+module.exports = { handleMessage, startFlow, clearDraft, resume, handleLocation, isDraftStale };
