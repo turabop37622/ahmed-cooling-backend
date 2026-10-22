@@ -60,8 +60,9 @@ const MENU_ROWS = [
   ['menu_areas', ['Service areas', 'مناطق الخدمة'], ['Jeddah and Makkah', 'جدة ومكة']],
   ['menu_contact', ['Contact & hours', 'التواصل والدوام'], ['Phone, website, emergency line', 'الهاتف والموقع وخط الطوارئ']],
   ['menu_human', ['Talk to our team', 'تحدث مع فريقنا'], ['Chat with a real person', 'تحدث مع موظف']],
-  ['menu_lang', ['Change language', 'تغيير اللغة'], ['English / العربية', 'English / العربية']],
 ];
+// Language is chosen once, from the buttons in the very first message — it is deliberately not a menu row.
+// (Typing "english" / "arabic" / "عربي" still switches it; a stale "menu_lang" tap from an older menu still works.)
 
 const sendMainMenu = async (phone, lang, intro) => {
   const body = `${intro ? `${intro}\n\n` : ''}${L(lang,
