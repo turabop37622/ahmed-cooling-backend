@@ -14,6 +14,7 @@ const bookingBot = require('../utils/whatsappBookingBot');
 const bookingFlow = require('../utils/whatsappBookingFlow');
 const chatbot = require('../utils/whatsappChatbot');
 const menu = require('../utils/whatsappMenu');
+const faq = require('../utils/whatsappFaq');
 const store = require('../utils/whatsappConversationStore');
 
 // Meta signs every webhook body with the app secret (X-Hub-Signature-256: sha256=<hmac>). Without checking it, anyone
@@ -100,9 +101,44 @@ const handleMessage = async (message, waId, customerName) => {
   // A menu/language tap always wins (it also abandons a half-finished booking chat); otherwise a booking chat in
   // progress owns the reply, then the front door, then the AI.
   const menuTap = !!id && /^(menu_|lang_)/.test(id);
-  if (!menuTap && conversation.bookingDraft?.step && await bookingFlow.handleMessage(phone, input, conversation)) return;
+  if (!menuTap && conversation.bookingDraft?.step) {
+    if (!id && await handleInterruption(phone, text, conversation)) return;
+    if (await bookingFlow.handleMessage(phone, input, conversation)) return;
+  }
   if (await menu.handle(phone, input, conversation)) return;
   if (isText) await chatbot.handleIncomingText(phone, text, conversation);
+};
+
+// Typed text in the middle of a booking chat that is not an answer to the current step — "change the language",
+// "what are your hours?", "talk to a human". Without this the step would swallow it (e.g. as the address).
+// Returns true if handled; the booking is then resumed where it was, unless the customer asked to leave it.
+const handleInterruption = async (phone, text, conversation) => {
+  const norm = faq.normalize(text);
+  const tokens = faq.tokensOf(norm);
+  const isAr = conversation.language === 'ar';
+
+  const langRequest = faq.languageRequest(norm);
+  if (langRequest && tokens.length <= 5) {
+    if (langRequest === 'ask') {
+      await bookingFlow.clearDraft(phone);
+      return menu.handle(phone, text, conversation);
+    }
+    await store.setLanguage(phone, langRequest);
+    await bookingFlow.resume(phone, langRequest === 'ar');
+    return true;
+  }
+
+  if (chatbot.isHandoffRequest(text) || /^(menu|main menu|القائمة)$/.test(norm)) {
+    await bookingFlow.clearDraft(phone);
+    return menu.handle(phone, text, conversation);
+  }
+
+  const asksQuestion = /[?؟]/.test(text) || tokens.length <= 6;
+  if (asksQuestion && faq.matchIntent(norm) && await menu.handle(phone, text, conversation)) {
+    await bookingFlow.resume(phone, isAr);
+    return true;
+  }
+  return false;
 };
 
 // Meta retries the webhook if it doesn't get a fast 2xx, so we ack first and handle the message after responding.

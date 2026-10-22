@@ -93,6 +93,19 @@ const replyTimeList = async (phone, isAr, date) => {
   await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
 };
 
+const replyConfirm = async (phone, d, isAr) => {
+  const serviceLabel = isAr ? d.serviceNameAr : d.serviceName;
+  await replyButtons(phone,
+    L(isAr,
+      `Please confirm:\n• Service: ${serviceLabel}\n• Date: ${d.date}\n• Time: ${d.time}\n• Address: ${d.address}`,
+      `الرجاء التأكيد:\n• الخدمة: ${serviceLabel}\n• التاريخ: ${d.date}\n• الوقت: ${d.time}\n• العنوان: ${d.address}`),
+    [
+      { id: 'confirm_yes', title: L(isAr, 'Yes, confirm', 'نعم، أؤكد') },
+      { id: 'confirm_change', title: L(isAr, 'Change', 'تغيير') },
+      { id: 'confirm_cancel', title: L(isAr, 'No, cancel', 'لا، إلغاء') },
+    ]);
+};
+
 const replyServiceList = async (phone, isAr) => {
   const bodyText = L(isAr, 'Which service would you like to book?', 'ما الخدمة التي تريد حجزها؟');
   const rows = LIST_SERVICES.map((s, i) => ({
@@ -267,16 +280,7 @@ const advanceDraft = async (phone, input, draft, isAr) => {
     }
     const confirmed = { ...draft, step: 'confirm', address };
     await setDraft(phone, confirmed);
-    const serviceLabel = isAr ? confirmed.serviceNameAr : confirmed.serviceName;
-    await replyButtons(phone,
-      L(isAr,
-        `Please confirm:\n• Service: ${serviceLabel}\n• Date: ${confirmed.date}\n• Time: ${confirmed.time}\n• Address: ${address}`,
-        `الرجاء التأكيد:\n• الخدمة: ${serviceLabel}\n• التاريخ: ${confirmed.date}\n• الوقت: ${confirmed.time}\n• العنوان: ${address}`),
-      [
-        { id: 'confirm_yes', title: L(isAr, 'Yes, confirm', 'نعم، أؤكد') },
-        { id: 'confirm_change', title: L(isAr, 'Change', 'تغيير') },
-        { id: 'confirm_cancel', title: L(isAr, 'No, cancel', 'لا، إلغاء') },
-      ]);
+    await replyConfirm(phone, confirmed, isAr);
     return;
   }
 
@@ -340,4 +344,17 @@ const createFromDraft = async (phone, draft, isAr) => {
 
 const clearDraft = (phone) => setDraft(phone, null);
 
-module.exports = { handleMessage, startFlow, clearDraft };
+// After the customer interrupted the chat (asked a question, switched language), re-asks whatever step they were on.
+const resume = async (phone, isAr) => {
+  const conversation = await draftStatus(phone);
+  const draft = conversation?.bookingDraft;
+  if (!draft?.step) return;
+  await reply(phone, L(isAr, 'Let\'s continue your booking:', 'لنكمل حجزك:'));
+  if (draft.step === 'service') await replyServiceList(phone, isAr);
+  else if (draft.step === 'date') await replyDateList(phone, isAr);
+  else if (draft.step === 'time') await replyTimeList(phone, isAr, draft.date);
+  else if (draft.step === 'address') await reply(phone, L(isAr, 'What is the full address for the visit? (area, street and building/landmark)', 'ما هو العنوان الكامل للزيارة؟ (الحي والشارع والمبنى أو أقرب معلم)'));
+  else if (draft.step === 'confirm') await replyConfirm(phone, draft, isAr);
+};
+
+module.exports = { handleMessage, startFlow, clearDraft, resume };
