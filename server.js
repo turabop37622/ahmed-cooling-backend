@@ -1508,6 +1508,7 @@ async function startServer() {
     // ============================================
     app.use('/api/whatsapp', require('./routes/whatsappWebhook'));
     require('./utils/whatsappBookingBot').startScheduler();
+    require('./utils/whatsappHealth').start();
 
     // ============================================
     // GEOCODE PROXY (keeps Google API key server-side)

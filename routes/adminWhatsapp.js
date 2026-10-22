@@ -11,11 +11,17 @@ const Booking = require('../models/Booking');
 const whatsappCloud = require('../utils/whatsappCloud');
 const { logMessage, setStatus } = require('../utils/whatsappConversationStore');
 const { phoneVariants } = require('../utils/phone');
+const whatsappHealth = require('../utils/whatsappHealth');
 
 const adminOnly = (req, res, next) => {
   if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: 'Admin only' });
   next();
 };
+
+// Whether Meta currently accepts our WhatsApp token (see utils/whatsappHealth.js). `ok: false` = the bot is cut off.
+router.get('/health', auth, adminOnly, (req, res) => {
+  res.json({ success: true, health: whatsappHealth.getState() });
+});
 
 // List conversations, most recently active first. ?status=needs_human filters to just the ones waiting on a
 // human; omit it to see everything.

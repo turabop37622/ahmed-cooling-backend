@@ -86,4 +86,23 @@ const sendListMessage = (to, bodyText, buttonText, sections) => post({
   },
 });
 
-module.exports = { isConfigured, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, toWaId };
+// Cheap read-only call that tells us whether Meta currently accepts our token (no message is sent).
+// ok: true = accepted; false = Meta answered with an error (blocked/expired/revoked — `message` says which);
+// null = couldn't tell (not configured, or a network problem on our side).
+const probe = async () => {
+  if (!isConfigured()) return { ok: null, message: 'WhatsApp Cloud API is not configured' };
+  try {
+    await axios.get(`https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}`, {
+      params: { fields: 'id' },
+      headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
+      timeout: 15000,
+    });
+    return { ok: true };
+  } catch (err) {
+    const metaError = err.response?.data?.error;
+    if (metaError) return { ok: false, message: metaError.message, code: metaError.code };
+    return { ok: null, message: err.message };
+  }
+};
+
+module.exports = { isConfigured, probe, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, toWaId };

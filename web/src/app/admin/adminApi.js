@@ -315,6 +315,8 @@ export const getWhatsAppConversations = (params) => data(api.get('/admin/whatsap
 
 export const getWhatsAppMessages = (phone) => data(api.get(`/admin/whatsapp/conversations/${id_(phone)}/messages`));
 
+export const getWhatsAppHealth = () => data(api.get('/admin/whatsapp/health'));
+
 export const getWhatsAppCustomer = (phone) => data(api.get(`/admin/whatsapp/conversations/${id_(phone)}/customer`));
 
 export const sendWhatsAppReply = (phone, message) =>
@@ -357,6 +359,7 @@ export const adminApi = {
   getRatings,
   getWhatsAppConversations,
   getWhatsAppMessages,
+  getWhatsAppHealth,
   getWhatsAppCustomer,
   sendWhatsAppReply,
   releaseWhatsAppConversation,

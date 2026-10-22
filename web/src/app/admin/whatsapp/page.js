@@ -176,6 +176,7 @@ export default function AdminWhatsAppPage() {
   const [selectedPhone, setSelectedPhone] = useState(null);
   const [messages, setMessages] = useState([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
+  const [health, setHealth] = useState(null);
   const [customer, setCustomer] = useState(null);
   const [customerLoading, setCustomerLoading] = useState(false);
   const [customerPanelOpen, setCustomerPanelOpen] = useState(true);
@@ -206,6 +207,17 @@ export default function AdminWhatsAppPage() {
     const id = setInterval(() => fetchConversations(tab), POLL_MS);
     return () => clearInterval(id);
   }, [tab, fetchConversations]);
+
+  // Is Meta still letting the bot send/receive? (checked server-side every 10 minutes)
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => adminApi.getWhatsAppHealth()
+      .then((res) => { if (!cancelled) setHealth(res?.health || null); })
+      .catch(() => {});
+    load();
+    const id = setInterval(load, 60000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   const fetchMessages = useCallback(async (phone, { silent } = {}) => {
     if (!silent) setMessagesLoading(true);
@@ -289,6 +301,23 @@ export default function AdminWhatsAppPage() {
           {L('Refresh', 'تحديث')}
         </button>
       </div>
+
+      {health?.ok === false && (
+        <div role="alert" className="rounded-2xl border border-rose-200 dark:border-rose-500/30 bg-rose-50 dark:bg-rose-500/10 px-4 py-3 text-sm text-rose-800 dark:text-rose-200">
+          <p className="font-semibold">
+            {L('WhatsApp is disconnected — the bot cannot receive or send messages right now.', 'واتساب غير متصل — لا يستطيع البوت استقبال أو إرسال الرسائل حالياً.')}
+          </p>
+          <p className="mt-0.5 text-xs opacity-90" dir="ltr">
+            {L('Meta says:', 'ميتا تقول:')} {health.message || 'API access blocked'}
+          </p>
+          <p className="mt-1 text-xs opacity-90">
+            {L(
+              'Approve any "was this you?" login notice on the Facebook account that owns the app and finish any security check. This banner clears itself within 10 minutes of access coming back.',
+              'وافق على أي إشعار «هل هذا أنت؟» في حساب فيسبوك المالك للتطبيق وأكمل أي فحص أمني. يختفي هذا التنبيه تلقائياً خلال 10 دقائق من عودة الاتصال.'
+            )}
+          </p>
+        </div>
+      )}
 
       <div className={`${card} overflow-hidden`}>
         <div className="flex h-[70vh] min-h-[480px]">
