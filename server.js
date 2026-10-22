@@ -60,7 +60,10 @@ app.use(cors({
 
 // Body parsing and operator-injection blocking run BEFORE the limiters, because the limiters key
 // some routes by the email/phone in the body.
-app.use(express.json({ limit: '100kb' }));
+// The WhatsApp webhook's raw bytes are kept so routes/whatsappWebhook.js can check Meta's signature over exactly
+// what was sent (re-serialising the parsed JSON would not reproduce it byte for byte).
+const isWhatsAppWebhook = (req) => req.path === '/api/whatsapp/webhook';
+app.use(express.json({ limit: '100kb', verify: (req, res, buf) => { if (isWhatsAppWebhook(req)) req.rawBody = buf; } }));
 app.use(express.urlencoded({ limit: '100kb', extended: true }));
 
 // Meta's WhatsApp webhook verification handshake uses dotted query keys (hub.mode, hub.verify_token,
@@ -77,7 +80,11 @@ app.get('/api/whatsapp/webhook', (req, res) => {
   return res.sendStatus(403);
 });
 
-app.use(rejectMongoOperators);
+// Meta's message payloads nest 9+ levels deep (entry > changes > value > messages > interactive > button_reply),
+// which rejectMongoOperators treats as hostile — it was rejecting every button/list tap with a 400. The webhook is
+// protected by Meta's request signature instead (routes/whatsappWebhook.js), and its handlers only ever read
+// individual string fields, never pass the payload to a database query.
+app.use((req, res, next) => (req.method === 'POST' && isWhatsAppWebhook(req) ? next() : rejectMongoOperators(req, res, next)));
 
 mountAuthLimiters(app);
 

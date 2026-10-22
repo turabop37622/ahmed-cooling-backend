@@ -7,6 +7,7 @@
 //   5. Anything that is left -> utils/whatsappChatbot.js (the AI, plus "talk to a human" handoff)
 //
 // Docs: https://developers.facebook.com/docs/graph-api/webhooks/getting-started
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const bookingBot = require('../utils/whatsappBookingBot');
@@ -15,7 +16,25 @@ const chatbot = require('../utils/whatsappChatbot');
 const menu = require('../utils/whatsappMenu');
 const store = require('../utils/whatsappConversationStore');
 
-const VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
+// Meta signs every webhook body with the app secret (X-Hub-Signature-256: sha256=<hmac>). Without checking it, anyone
+// who knows this URL can post fake "customer" messages and drive the booking flow — creating real bookings, admin
+// emails and technician assignments for people who don't exist. Set WHATSAPP_APP_SECRET (App settings > Basic >
+// App secret) to turn the check on; until it is set the webhook still accepts everything, with a one-time warning.
+const APP_SECRET = process.env.WHATSAPP_APP_SECRET;
+let warnedNoSecret = false;
+const validSignature = (req) => {
+  if (!APP_SECRET) {
+    if (!warnedNoSecret) {
+      warnedNoSecret = true;
+      console.warn('⚠️ WHATSAPP_APP_SECRET is not set — WhatsApp webhook requests are NOT being authenticated.');
+    }
+    return true;
+  }
+  if (!req.rawBody) return false;
+  const expected = Buffer.from(`sha256=${crypto.createHmac('sha256', APP_SECRET).update(req.rawBody).digest('hex')}`);
+  const received = Buffer.from(req.get('X-Hub-Signature-256') || '');
+  return received.length === expected.length && crypto.timingSafeEqual(received, expected);
+};
 
 // The GET verification handshake (dotted hub.* query keys) is answered in server.js, before the
 // rejectMongoOperators middleware that would otherwise reject it — see the comment there.
@@ -26,15 +45,17 @@ const toWaId = (message, waId) => `+${String(waId || message.from || '').replace
 // distinct from `message.button`, which is a tap on an approved TEMPLATE's fixed quick-reply button.
 const interactiveReply = (message) => message.interactive?.button_reply || message.interactive?.list_reply || null;
 
+const str = (value) => (typeof value === 'string' ? value : '');
+
 const inboundText = (message) => {
-  if (message.type === 'text') return message.text?.body || '';
-  return interactiveReply(message)?.title || message.button?.text || '';
+  if (message.type === 'text') return str(message.text?.body);
+  return str(interactiveReply(message)?.title) || str(message.button?.text);
 };
 
 // Fixed payload from an approved template's quick-reply button (utils/whatsappBookingBot.js's "please confirm"
 // nudge) — never present on our own interactive messages, which carry an `id` instead (see interactiveReply).
-const buttonPayload = (message) => message.button?.payload;
-const interactiveId = (message) => interactiveReply(message)?.id || null;
+const buttonPayload = (message) => str(message.button?.payload) || undefined;
+const interactiveId = (message) => str(interactiveReply(message)?.id) || null;
 
 // Meta re-sends a webhook it thinks we didn't acknowledge; without this a retry would be answered twice.
 const SEEN_TTL_MS = 10 * 60 * 1000;
@@ -86,6 +107,7 @@ const handleMessage = async (message, waId, customerName) => {
 
 // Meta retries the webhook if it doesn't get a fast 2xx, so we ack first and handle the message after responding.
 router.post('/webhook', (req, res) => {
+  if (!validSignature(req)) return res.sendStatus(401);
   res.sendStatus(200);
   try {
     for (const entry of req.body?.entry || []) {
