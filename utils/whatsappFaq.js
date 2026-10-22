@@ -31,10 +31,10 @@ const normalize = (s) => String(s || '')
 const tokensOf = (norm) => (norm ? norm.split(' ') : []);
 
 // ---------- greetings / thanks / language ----------
-const GREETING = new Set(['hi', 'hii', 'hello', 'helo', 'hey', 'hola', 'salam', 'salaam', 'assalam', 'assalamualaikum', 'assalamu', 'alaikum', 'menu', 'start', 'help', 'good',
+const GREETING = new Set(['hi', 'hii', 'hello', 'helo', 'hey', 'hola', 'salam', 'salaam', 'assalam', 'assalamualaikum', 'assalamu', 'alaikum', 'alikum', 'aslam', 'aslamo', 'aoa', 'slm', 'walaikum', 'walikum', 'menu', 'start', 'help', 'good',
   'السلام', 'سلام', 'مرحبا', 'مرحبتين', 'اهلا', 'اهلين', 'هلا', 'هلو', 'هاي', 'صباح', 'مساء', 'قايمه', 'القايمه', 'ابدا', 'مساعده']);
 const THANKS = new Set(['thanks', 'thank', 'thx', 'thankyou', 'shukriya', 'shukria', 'jazakallah', 'jazak', 'شكرا', 'شكرن', 'مشكور', 'مشكوره', 'جزاك', 'يعطيك', 'تسلم']);
-const FILLER = new Set(['dear', 'sir', 'madam', 'team', 'there', 'all', 'everyone', 'brother', 'bro', 'bhai', 'ji', 'jee', 'g', 'sahab', 'morning', 'evening', 'afternoon', 'night', 'how', 'are', 'you',
+const FILLER = new Set(['o', 'wa', 'dear', 'sir', 'madam', 'team', 'there', 'all', 'everyone', 'brother', 'bro', 'bhai', 'ji', 'jee', 'g', 'sahab', 'morning', 'evening', 'afternoon', 'night', 'how', 'are', 'you',
   'what', 's', 'up', 'kya', 'haal', 'hai', 'aap', 'very', 'much', 'so', 'a', 'lot', 'allah', 'khair', 'khairan', 'ok', 'okay', 'again', 'the', 'for', 'your', 'help', 'please',
   'عليكم', 'ورحمه', 'الله', 'وبركاته', 'وعليكم', 'اخي', 'حياك', 'كيف', 'حالك', 'خير', 'جميعا', 'فريق', 'كثير', 'الف', 'يعافيك', 'عليك', 'لك']);
 

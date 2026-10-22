@@ -174,7 +174,9 @@ const handle = async (phone, input, conversation) => {
 
   if (faq.isThanks(norm)) { await say(phone, faq.REPLIES.thanks(lang)); return true; }
   if (faq.isGreeting(norm)) {
-    await sendMainMenu(phone, lang, L(lang, 'Hello! Welcome to Ahmed Cooling Workshop.', 'أهلاً وسهلاً بك في ورشة أحمد للتبريد.'));
+    // A hello opens a fresh chat, so offer the language choice every time; "menu"/"help" just show the menu.
+    if (/^(menu|start|help|قايمه|القايمه|ابدا|مساعده)$/.test(norm)) { await sendMainMenu(phone, lang); return true; }
+    await sendLanguagePrompt(phone);
     return true;
   }
 
