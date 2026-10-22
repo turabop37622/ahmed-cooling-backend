@@ -13,7 +13,7 @@ const Service = require('../models/Service');
 const WhatsAppConversation = require('../models/WhatsAppConversation');
 const { sendTextMessage, sendButtonsMessage, sendListMessage } = require('./whatsappCloud');
 const { logMessage } = require('./whatsappConversationStore');
-const { isBookableDate, isIsoDate, riyadhDate, addDays, normalizeTime } = require('./schedule');
+const { isBookableDate, isIsoDate, riyadhDate, addDays, normalizeTime, RIYADH_OFFSET_MS } = require('./schedule');
 const { normalizeCity } = require('./autoAssign');
 const bookingsRouter = require('../routes/bookings');
 
@@ -42,6 +42,23 @@ const setDraft = (phone, draft) => WhatsAppConversation.findOneAndUpdate(
   { upsert: true, new: true }
 );
 
+// Date list: today + the next 8 days, then "Other date" (typed) — 10 rows is WhatsApp's list limit.
+const DATE_LIST_DAYS = 9;
+const dateRowTitle = (iso, offset, isAr) => {
+  const d = new Date(`${iso}T12:00:00Z`);
+  const prefix = offset === 0 ? L(isAr, 'Today', 'اليوم') : offset === 1 ? L(isAr, 'Tomorrow', 'غداً') : '';
+  // Today/Tomorrow already name the weekday, and the 24-char row-title limit is tight in Arabic.
+  const label = d.toLocaleDateString(isAr ? 'ar-SA-u-ca-gregory' : 'en-GB', { ...(prefix ? {} : { weekday: 'short' }), day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return (prefix ? `${prefix} · ${label}` : label).slice(0, 24);
+};
+
+// Visit windows start on the hour; they are not a promise of a fixed arrival — the technician still calls to agree.
+const TIME_SLOTS = ['08:00 AM', '10:00 AM', '12:00 PM', '02:00 PM', '04:00 PM', '06:00 PM', '08:00 PM'];
+const slotHour24 = (slot) => {
+  const m = /^(\d{2}):\d{2} ([AP])M$/.exec(slot);
+  return (Number(m[1]) % 12) + (m[2] === 'P' ? 12 : 0);
+};
+
 const reply = async (phone, text) => {
   await sendTextMessage(phone, text);
   await logMessage(phone, 'out', text, { messageType: 'text', sentBy: 'bot' });
@@ -50,6 +67,30 @@ const reply = async (phone, text) => {
 const replyButtons = async (phone, bodyText, buttons) => {
   await sendButtonsMessage(phone, bodyText, buttons);
   await logMessage(phone, 'out', `${bodyText} [${buttons.map((b) => b.title).join(' / ')}]`, { messageType: 'button', sentBy: 'bot' });
+};
+
+const replyDateList = async (phone, isAr) => {
+  const today = riyadhDate();
+  const rows = Array.from({ length: DATE_LIST_DAYS }, (_, i) => {
+    const iso = addDays(today, i);
+    return { id: `date_${iso}`, title: dateRowTitle(iso, i, isAr), description: iso };
+  });
+  rows.push({ id: 'date_other', title: L(isAr, 'Other date', 'تاريخ آخر'), description: L(isAr, 'Type a date, e.g. 30/11', 'اكتب تاريخاً، مثل 30/11') });
+  const bodyText = L(isAr, 'Great. Pick a date for the visit:', 'ممتاز. اختر تاريخ الزيارة:');
+  await sendListMessage(phone, bodyText, L(isAr, 'Choose date', 'اختر التاريخ'), [{ rows }]);
+  await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
+};
+
+const replyTimeList = async (phone, isAr, date) => {
+  const nowHour = new Date(Date.now() + RIYADH_OFFSET_MS).getUTCHours();
+  const slots = TIME_SLOTS.filter((t) => date !== riyadhDate() || slotHour24(t) > nowHour);
+  const fmt = (t) => (isAr ? t.replace('AM', 'ص').replace('PM', 'م') : t);
+  const rows = slots.map((t) => ({ id: `time_${t.replace(/\W/g, '')}`, title: fmt(t) }));
+  rows.push({ id: 'time_anytime', title: L(isAr, 'Anytime', 'أي وقت'), description: L(isAr, 'Technician will call to agree', 'سيتصل بك الفني للاتفاق') });
+  rows.push({ id: 'time_other', title: L(isAr, 'Other time', 'وقت آخر'), description: L(isAr, 'Type a time, e.g. 3:30 PM', 'اكتب وقتاً، مثل 3:30 PM') });
+  const bodyText = L(isAr, 'What time suits you?', 'ما الوقت المناسب لك؟');
+  await sendListMessage(phone, bodyText, L(isAr, 'Choose time', 'اختر الوقت'), [{ rows }]);
+  await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
 };
 
 const replyServiceList = async (phone, isAr) => {
@@ -161,37 +202,48 @@ const advanceDraft = async (phone, input, draft, isAr) => {
       return;
     }
     await setDraft(phone, { step: 'date', serviceId: String(item._id), serviceName: item.name, serviceNameAr: item.nameAr || item.name });
-    await replyButtons(phone,
-      L(isAr, 'Great. What date would you like?', 'ممتاز. ما التاريخ المناسب؟'),
-      [{ id: 'date_today', title: L(isAr, 'Today', 'اليوم') }, { id: 'date_tomorrow', title: L(isAr, 'Tomorrow', 'غداً') }]);
-    await reply(phone, L(isAr,
-      'Or type a specific date, e.g. "30", "30/11", or 2026-11-05.',
-      'أو أرسل تاريخاً محدداً، مثل "30" أو "30/11" أو 2026-11-05.'));
+    await replyDateList(phone, isAr);
     return;
   }
 
   if (draft.step === 'date') {
-    const text = input === 'date_today' ? 'today' : input === 'date_tomorrow' ? 'tomorrow' : input;
+    if (input === 'date_other') {
+      await reply(phone, L(isAr,
+        'Type the date, e.g. "30", "30/11" or 2026-11-05.',
+        'اكتب التاريخ، مثل "30" أو "30/11" أو 2026-11-05.'));
+      return;
+    }
+    const picked = /^date_(\d{4}-\d{2}-\d{2})$/.exec(input);
+    const text = picked ? picked[1] : input === 'date_today' ? 'today' : input === 'date_tomorrow' ? 'tomorrow' : input;
     const date = parseDate(text);
     if (!date || !isBookableDate(date)) {
       await reply(phone, L(isAr,
-        'That date doesn\'t work — please reply "today", "tomorrow", a day like "30" or "30/11", within the next 60 days.',
-        'هذا التاريخ غير متاح — الرجاء إرسال "اليوم" أو "غداً" أو يوم مثل "30" أو "30/11" خلال 60 يوماً القادمة.'));
+        'That date doesn\'t work — please pick one from the list, or type a day like "30" or "30/11" within the next 60 days.',
+        'هذا التاريخ غير متاح — اختر من القائمة أو اكتب يوماً مثل "30" أو "30/11" خلال 60 يوماً القادمة.'));
+      await replyDateList(phone, isAr);
       return;
     }
     await setDraft(phone, { ...draft, step: 'time', date });
-    await reply(phone, L(isAr,
-      'What time works for you? e.g. "10:00 AM", "4 PM", "1pm", or "Anytime".',
-      'ما الوقت المناسب؟ مثال: "10:00 صباحاً" أو "4 مساءً" أو "في أي وقت".'));
+    await replyTimeList(phone, isAr, date);
     return;
   }
 
   if (draft.step === 'time') {
-    const time = normalizeTime(loosenTime(input.trim())) || (/anytime|أي\s*وقت/i.test(input) ? 'Anytime' : null);
+    if (input === 'time_other') {
+      await reply(phone, L(isAr,
+        'Type the time, e.g. "3:30 PM" or "4pm".',
+        'اكتب الوقت، مثل "3:30 PM" أو "4pm".'));
+      return;
+    }
+    const slot = /^time_(\d{2})(\d{2})([AP])M$/.exec(input);
+    const time = input === 'time_anytime' ? 'Anytime'
+      : slot ? `${slot[1]}:${slot[2]} ${slot[3]}M`
+        : normalizeTime(loosenTime(input.trim())) || (/anytime|أي\s*وقت/i.test(input) ? 'Anytime' : null);
     if (!time) {
       await reply(phone, L(isAr,
-        'I didn\'t understand that time — try something like "10:00 AM", "1pm", or "Anytime".',
-        'لم أفهم هذا الوقت — جرّب مثل "10:00 صباحاً" أو "أي وقت".'));
+        'I didn\'t understand that time — please pick one from the list, or type something like "3:30 PM".',
+        'لم أفهم هذا الوقت — اختر من القائمة أو اكتب مثل "3:30 PM".'));
+      await replyTimeList(phone, isAr, draft.date);
       return;
     }
     await setDraft(phone, { ...draft, step: 'address', time });
