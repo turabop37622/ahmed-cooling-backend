@@ -23,6 +23,12 @@ const technicianSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  // Frozen accounts cannot pick up bookings until frozenUntil (set automatically after too many cancellations in
+  // one day, or by an admin; an admin can lift it early).
+  frozenUntil: { type: Date },
+  frozenReason: { type: String, default: '' },
+  // Times another technician took over this one's booking because they were late.
+  lateCount: { type: Number, default: 0 },
   experience: {
     type: String,
     default: ''

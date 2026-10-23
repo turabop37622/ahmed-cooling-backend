@@ -41,7 +41,8 @@ const statsPipeline = (ids, today = riyadhDate()) => {
         completedToday: { $sum: { $cond: ['$_today', 1, 0] } },
         completedMonth: { $sum: { $cond: ['$_month', 1, 0] } },
         revenueTotal: { $sum: { $cond: [done, collected, 0] } },
-        commissionTotal: { $sum: { $cond: [done, { $ifNull: ['$commission.amount', 0] }, 0] } },
+        // Commission already taken from the technician's wallet (commission.prepaid) is not part of what they still owe.
+        commissionTotal: { $sum: { $cond: [{ $and: [done, { $ne: ['$commission.prepaid', true] }] }, { $ifNull: ['$commission.amount', 0] }, 0] } },
         earningsToday: { $sum: { $cond: ['$_today', share, 0] } },
         earningsMonth: { $sum: { $cond: ['$_month', share, 0] } },
       },

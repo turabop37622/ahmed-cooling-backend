@@ -139,6 +139,22 @@ const JOB_TEXT = {
     message: `Booking #${b.orderNumber} (${s.en}) is now on ${when.en || 'a new date'}.`,
     messageAr: `الحجز رقم ${b.orderNumber} (${s.ar}) أصبح بتاريخ ${when.ar || 'موعد جديد'}.`,
   }),
+  // Dispatch (utils/dispatch.js): a booking offered to this technician, first to accept wins.
+  offer: (b, s, when, area) => ({
+    title: 'New job offer', titleAr: 'عرض مهمة جديدة',
+    message: ['Job offer: ' + s.en, when.en, area].filter(Boolean).join(' · ') + ' — open the app to accept.',
+    messageAr: ['عرض مهمة: ' + s.ar, when.ar, area].filter(Boolean).join(' · ') + ' — افتح التطبيق للقبول.',
+  }),
+  late_offer: (b, s, when, area) => ({
+    title: 'Late job available', titleAr: 'مهمة متأخرة متاحة',
+    message: ['Late job: ' + s.en, when.en, area].filter(Boolean).join(' · ') + ' — pick it up if you can.',
+    messageAr: ['مهمة متأخرة: ' + s.ar, when.ar, area].filter(Boolean).join(' · ') + ' — خذها إن استطعت.',
+  }),
+  late: (b) => ({
+    title: 'You are late', titleAr: 'أنت متأخر',
+    message: `Booking #${b.orderNumber} is overdue. Contact the customer now — it may be given to another technician.`,
+    messageAr: `الحجز رقم ${b.orderNumber} متأخر. تواصل مع العميل الآن — قد يُسند لفني آخر.`,
+  }),
 };
 const notifyTechnicianJob = (technicianId, booking, event) => {
   const make = JOB_TEXT[event];

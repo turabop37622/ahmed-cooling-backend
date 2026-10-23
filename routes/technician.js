@@ -9,6 +9,9 @@ const auth = require('../middleware/auth');
 const technicianStats = require('../utils/technicianStats');
 const { getCommissionRate } = require('../utils/commission');
 const { riyadhDate } = require('../utils/schedule');
+const wallet = require('../utils/wallet');
+const dispatch = require('../utils/dispatch');
+const WalletTransaction = require('../models/WalletTransaction');
 
 const NOT_DELETED = { deletedAt: null };
 const OPEN = ['assigned', 'on_the_way', 'in_progress'];
@@ -83,7 +86,7 @@ router.get('/me', async (req, res) => {
   try {
     const [user, profile, stats, commissionRate] = await Promise.all([
       User.findById(req.user.id).select('fullName phone').lean(),
-      Technician.findOne({ user: req.user.id }).select('cities skills availability autoAssign active').lean(),
+      Technician.findOne({ user: req.user.id }).select('cities skills availability autoAssign active frozenUntil frozenReason').lean(),
       technicianStats.statsFor([req.user.id]),
       getCommissionRate(),
     ]);
@@ -100,6 +103,8 @@ router.get('/me', async (req, res) => {
         autoAssign: !!profile && profile.autoAssign === true,
         active: !!profile && profile.active !== false,
         hasProfile: !!profile,
+        frozenUntil: profile && profile.frozenUntil && new Date(profile.frozenUntil) > new Date() ? profile.frozenUntil : null,
+        frozenReason: profile && profile.frozenUntil && new Date(profile.frozenUntil) > new Date() ? profile.frozenReason || '' : '',
       },
       stats: {
         completedToday: s.completedToday, completedMonth: s.completedMonth, completedTotal: s.completedTotal,
@@ -151,6 +156,94 @@ router.get('/jobs/:id', async (req, res) => {
       .select(`${JOB_FIELDS} statusHistory`).lean();
     if (!booking) return res.status(404).json({ success: false, message: 'Job not found' });
     res.json({ success: true, job: shapeJob(booking, { history: true }) });
+  } catch (err) {
+    serverError(res);
+  }
+});
+
+// ---------- job offers (utils/dispatch.js) ----------
+// An offered booking shows the service, time, area and money, never the customer's phone or exact address: those
+// come with the job once it is accepted.
+const shapeOffer = (b, offer, commissionAmount) => {
+  const job = shapeJob(b);
+  return {
+    _id: job._id, orderNumber: job.orderNumber, date: job.date, time: job.time, service: job.service,
+    area: job.city || String(job.address || '').split(',')[0].trim().slice(0, 40),
+    city: job.city, totalAmount: job.totalAmount, currency: job.currency, priority: job.priority,
+    late: !!(offer && offer.late), expiresAt: offer ? offer.expiresAt : null, commissionToHold: commissionAmount,
+  };
+};
+
+router.get('/offers', async (req, res) => {
+  try {
+    const now = new Date();
+    const rows = await Booking.find({
+      ...NOT_DELETED,
+      offers: { $elemMatch: { technician: req.user.id, response: 'pending', expiresAt: { $gt: now } } },
+      $or: [{ status: 'confirmed', technician: null }, { status: 'assigned', lateOfferedAt: { $ne: null } }],
+    }).select(JOB_FIELDS + ' offers').sort({ date: 1, createdAt: 1 }).limit(10).lean();
+    const [balance, rate] = await Promise.all([wallet.balanceOf(req.user.id), getCommissionRate()]);
+    res.json({
+      success: true, balance,
+      offers: rows.map((b) => {
+        const mine = (b.offers || []).find((o) => String(o.technician) === req.user.id && o.response === 'pending');
+        return shapeOffer(b, mine, Math.round((b.totalAmount || 0) * rate * 100) / 100);
+      }),
+    });
+  } catch (err) {
+    console.error('Technician offers error:', err.message);
+    serverError(res);
+  }
+});
+
+const dispatchStatus = { frozen: 403, busy: 409, balance: 402, gone: 409, profile: 403, reason: 400 };
+
+router.post('/offers/:id/accept', async (req, res) => {
+  try {
+    if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(404).json({ success: false, message: 'Offer not found' });
+    const result = await dispatch.acceptOffer(req.params.id, req.user.id);
+    if (!result.ok) return res.status(dispatchStatus[result.code] || 400).json({ success: false, ...result });
+    res.json({ success: true, message: 'Booking accepted', job: shapeJob(result.booking), takenOver: !!result.takenOver });
+  } catch (err) {
+    console.error('Technician accept error:', err.message);
+    serverError(res);
+  }
+});
+
+router.post('/offers/:id/decline', async (req, res) => {
+  try {
+    if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(404).json({ success: false, message: 'Offer not found' });
+    await dispatch.declineOffer(req.params.id, req.user.id);
+    res.json({ success: true });
+  } catch (err) {
+    serverError(res);
+  }
+});
+
+// Give an accepted booking back. The reason is required; see dispatch.cancelByTechnician for the consequences.
+router.post('/jobs/:id/cancel', async (req, res) => {
+  try {
+    if (!/^[a-f\d]{24}$/i.test(req.params.id)) return res.status(404).json({ success: false, message: 'Job not found' });
+    const result = await dispatch.cancelByTechnician(req.params.id, req.user.id, req.body && req.body.reason);
+    if (!result.ok) return res.status(dispatchStatus[result.code] || 400).json({ success: false, ...result });
+    res.json({
+      success: true, message: 'Booking given back',
+      frozenUntil: result.frozenUntil, cancellationsToday: result.cancellationsToday,
+    });
+  } catch (err) {
+    console.error('Technician cancel error:', err.message);
+    serverError(res);
+  }
+});
+
+router.get('/wallet', async (req, res) => {
+  try {
+    const [balance, transactions] = await Promise.all([
+      wallet.balanceOf(req.user.id),
+      WalletTransaction.find({ technician: req.user.id }).sort({ createdAt: -1 }).limit(50)
+        .select('type amount note booking createdAt').lean(),
+    ]);
+    res.json({ success: true, balance, transactions });
   } catch (err) {
     serverError(res);
   }

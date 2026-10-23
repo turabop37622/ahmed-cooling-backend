@@ -50,7 +50,7 @@
         ref: 'User'
       },
       // How / when the current technician was assigned ('auto' = utils/autoAssign.js when the booking is created).
-      assignedBy: { type: String, enum: ['auto', 'admin'] },
+      assignedBy: { type: String, enum: ['auto', 'admin', 'offer'] },
       assignedAt: { type: Date },
       // Filled when the booking becomes completed (PUT /api/bookings/:id/status).
       completion: {
@@ -66,7 +66,33 @@
         rate: Number,
         amount: Number,
         technicianShare: Number,
-        base: Number
+        base: Number,
+        // True when the commission was already taken from the technician's wallet (utils/wallet.js) — it is then not
+        // part of the old "commission owed" balance.
+        prepaid: Boolean
+      },
+
+      // Dispatch (utils/dispatch.js): the technicians a booking was offered to, and the commission set aside from
+      // the picking technician's wallet.
+      offers: [{
+        technician: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        offeredAt: Date,
+        expiresAt: Date,
+        late: Boolean,
+        response: { type: String, enum: ['pending', 'accepted', 'declined', 'expired', 'taken'], default: 'pending' },
+        respondedAt: Date,
+        _id: false
+      }],
+      offerRound: { type: Number, default: 0 },
+      offersExhaustedAt: { type: Date },
+      // Set when the assigned technician is late and the booking was offered to others as well.
+      lateOfferedAt: { type: Date },
+      commissionHold: {
+        technician: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        amount: Number,
+        rate: Number,
+        status: { type: String, enum: ['held', 'review', 'released', 'settled', 'forfeited'] },
+        at: Date
       },
 
       // ============================================

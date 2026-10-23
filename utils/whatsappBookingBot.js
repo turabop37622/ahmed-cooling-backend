@@ -21,6 +21,7 @@ const { escapeHtml } = require('./security');
 const whatsappCloud = require('./whatsappCloud');
 const { logMessage } = require('./whatsappConversationStore');
 const autoAssign = require('./autoAssign');
+const dispatch = require('./dispatch');
 const { normalizeCity } = autoAssign;
 const { notifyTechnicianJob } = require('./notify');
 
@@ -101,13 +102,16 @@ const notifyAdminIssue = async (booking, { issue, detail }) => {
 // Moves a confirmed booking's job forward: tries auto-assign, acks the customer, tells the admin. Shared by the
 // direct "Yes" tap and by handleAddressFixText once a bad address has been corrected.
 const finalizeConfirm = async (confirmed, phone) => {
-  const auto = await autoAssign.autoAssignBooking(confirmed, { fromStatus: 'confirmed' });
+  const dispatched = await dispatch.dispatch(confirmed, { fromStatus: 'confirmed' });
+  // Offer mode: the booking now waits for a technician to pick it up, nobody is assigned yet.
+  const auto = dispatched && dispatched.mode === 'auto' ? dispatched : null;
+  const offered = !!(dispatched && dispatched.mode === 'offer');
   if (auto) notifyTechnicianJob(auto.technician._id, auto.booking, 'assigned').catch(() => {});
   const finalBooking = auto ? auto.booking : confirmed;
 
   const ack = auto
     ? L(confirmed, `Thanks! Your booking #${confirmed.orderNumber} is confirmed and a technician has been assigned.`, `شكراً لك! تم تأكيد حجزك رقم ${confirmed.orderNumber} وتعيين فني له.`)
-    : L(confirmed, `Thanks! Your booking #${confirmed.orderNumber} is confirmed. A technician will be assigned shortly.`, `شكراً لك! تم تأكيد حجزك رقم ${confirmed.orderNumber}. سيتم تعيين فني له قريباً.`);
+    : L(confirmed, offered ? `Thanks! Your booking #${confirmed.orderNumber} is confirmed. We are finding the nearest technician — they will contact you shortly.` : `Thanks! Your booking #${confirmed.orderNumber} is confirmed. A technician will be assigned shortly.`, offered ? `شكراً لك! تم تأكيد حجزك رقم ${confirmed.orderNumber}. نبحث لك عن أقرب فني وسيتواصل معك قريباً.` : `شكراً لك! تم تأكيد حجزك رقم ${confirmed.orderNumber}. سيتم تعيين فني له قريباً.`);
   await whatsappCloud.sendTextMessage(phone, ack);
   await logMessage(phone, 'out', ack, { messageType: 'text', sentBy: 'bot' });
   await notifyAdminBookingReply(finalBooking, { reply: 'confirm', autoAssigned: !!auto });

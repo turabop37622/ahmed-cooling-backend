@@ -532,6 +532,7 @@ router.delete('/bookings/:id', async (req, res) => {
 // TECHNICIANS + SETTINGS (routes/adminTechnicians.js; admin-only through the router.use(adminAuth) above)
 // ============================================
 router.use(require('./adminTechnicians'));
+router.use(require('./adminDispatch'));
 
 // ============================================
 // USERS

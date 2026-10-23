@@ -9,6 +9,8 @@ const Technician = require('../models/Technician');
 const { notifyUser, notifyTechnicianJob } = require('../utils/notify');
 // Used through the module object so tests can replace it.
 const autoAssign = require('../utils/autoAssign');
+const dispatch = require('../utils/dispatch');
+const wallet = require('../utils/wallet');
 const { getCommissionRate, computeCommission, parseAmountCollected } = require('../utils/commission');
 // Shared with the website. Regular services are priced from the DATABASE (the source of truth); this file only adds
 // the fixed-price packages (pkg_*, technician visit fee included) and maps the old numeric ids '1'...'9' to the
@@ -740,6 +742,7 @@ const cancelForOwner = async (req, res, booking) => {
   }
   notifyBooking(updated, 'cancelled');
   if (updated.technician) notifyTechnicianJob(updated.technician, updated, 'cancelled').catch(() => {});
+  await wallet.releaseHold(updated, { note: `Commission returned: #${updated.orderNumber} was cancelled` }).catch((e) => console.error('⚠️ Wallet release failed:', e.message));
   return res.json({ success: true, message: 'Booking cancelled', data: { bookingId, status: updated.status }, booking: updated });
 };
 
@@ -999,8 +1002,8 @@ router.post('/public', auth, createLimiter, [
 
     // Automatic technician assignment (utils/autoAssign.js). Never fails the request: nobody matching, or any error,
     // leaves the booking pending for the admin.
-    const auto = await autoAssign.autoAssignBooking(booking);
-    if (auto && auto.booking) {
+    const auto = await dispatch.dispatch(booking);
+    if (auto && auto.mode === 'auto' && auto.booking) {
       notifyBooking(auto.booking, 'assigned');
       notifyTechnicianJob(auto.booking.technician, auto.booking, 'assigned').catch(() => {});
       audit({
@@ -1088,8 +1091,8 @@ const createBookingForPhone = async ({ customerName, phone, serviceRecord, date,
   sendAdminNotificationEmail({ ...emailData, emailNonce: emailActionNonce });
   notifyBooking(booking, 'received');
 
-  const auto = await autoAssign.autoAssignBooking(booking);
-  if (auto && auto.booking) {
+  const auto = await dispatch.dispatch(booking);
+  if (auto && auto.mode === 'auto' && auto.booking) {
     notifyBooking(auto.booking, 'assigned');
     notifyTechnicianJob(auto.booking.technician, auto.booking, 'assigned').catch(() => {});
   }
@@ -1302,7 +1305,11 @@ router.put('/:id/status', auth, async (req, res) => {
         completedByRole: role,
       };
       // Commission only when a technician did the job; the current rate is frozen on the booking.
-      if (booking.technician) $set.commission = computeCommission(parsed.value, await getCommissionRate());
+      if (booking.technician) {
+        $set.commission = computeCommission(parsed.value, await getCommissionRate());
+        // Taken from the technician's wallet when they picked the job up (utils/wallet.js), not owed afterwards.
+        if (booking.commissionHold && booking.commissionHold.status === 'held') $set.commission.prepaid = true;
+      }
     }
     let note = notes || `Updated by ${role}`;
     if (status === 'cancelled') {
@@ -1328,6 +1335,10 @@ router.put('/:id/status', auth, async (req, res) => {
 
     if (status === 'completed' && updated.technician) {
       await Technician.updateOne({ user: updated.technician }, { $inc: { completedJobs: 1 } });
+      await wallet.settleOnCompletion(updated).catch((e) => console.error('⚠️ Wallet settle failed:', e.message));
+    }
+    if (status === 'cancelled') {
+      await wallet.releaseHold(updated, { note: `Commission returned: #${updated.orderNumber} was cancelled` }).catch((e) => console.error('⚠️ Wallet release failed:', e.message));
     }
 
     if (status === 'confirmed' && updated.email) {
@@ -1419,6 +1430,11 @@ router.put('/:id/assign', auth, async (req, res) => {
 
     notifyBooking(updated, 'assigned');
     notifyTechnicianJob(technician._id, updated, 'assigned').catch(() => {});
+    // Offer mode: the commission follows the job — back to the previous technician's wallet, set aside from the new one's.
+    if ((await dispatch.getSettings()).offerMode) {
+      await wallet.releaseHold(updated, { note: `Commission returned: #${updated.orderNumber} was reassigned` }).catch(() => {});
+      await wallet.createHold(updated, technician._id, { createdBy: req.user.id }).catch((e) => console.error('⚠️ Wallet hold failed:', e.message));
+    }
     // The previous technician (reassignment) is told the job is no longer theirs.
     if (previousTechnician && previousTechnician !== String(technician._id)) {
       notifyTechnicianJob(previousTechnician, updated, 'reassigned').catch(() => {});
