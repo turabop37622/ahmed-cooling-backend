@@ -19,7 +19,7 @@ const autoAssign = require('./autoAssign');
 const wallet = require('./wallet');
 const { notifyUser, notifyTechnicianJob } = require('./notify');
 const dispatchWhatsApp = require('./dispatchWhatsApp');
-const { RIYADH_OFFSET_MS, riyadhDate, normalizeTime } = require('./schedule');
+const { RIYADH_OFFSET_MS, riyadhDate, addDays, normalizeTime } = require('./schedule');
 
 const { OPEN_STATUSES } = autoAssign;
 const MINUTE = 60 * 1000;
@@ -125,9 +125,15 @@ const openBookingsFor = async (technicianId, from = {}) => {
   const profile = await Technician.findOne({ user: technicianId, autoAssign: true, active: { $ne: false } })
     .select('cities skills currentLocation frozenUntil').lean();
   if (!profile) return [];
+  // A booking whose day has already passed is stale (the admin handles those), so it is not offered.
+  const today = riyadhDate();
+  const notPast = { $or: [{ date: { $gte: today } }, { date: null }, { date: '' }] };
   const rows = await Booking.find({
     deletedAt: null, hiddenFrom: { $ne: technicianId },
-    $or: [{ status: 'confirmed', technician: null }, { status: 'assigned', lateOfferedAt: { $ne: null }, technician: { $ne: technicianId } }],
+    $and: [
+      notPast,
+      { $or: [{ status: 'confirmed', technician: null }, { status: 'assigned', lateOfferedAt: { $ne: null }, technician: { $ne: technicianId } }] },
+    ],
   }).sort({ createdAt: 1 }).limit(100).lean();
   const mine = rows.filter((b) => autoAssign.profileMatches(profile, autoAssign.bookingCity(b), autoAssign.bookingCategory(b)));
   const loc = profile.currentLocation && profile.currentLocation.coordinates ? profile.currentLocation.coordinates : [];
@@ -355,7 +361,8 @@ const flagLateJobs = async (now) => {
   const s = await getSettings();
   const today = riyadhDate(now);
   const candidates = await Booking.find({
-    status: 'assigned', technician: { $ne: null }, lateOfferedAt: { $exists: false }, deletedAt: null, date: { $lte: today },
+    status: 'assigned', technician: { $ne: null }, lateOfferedAt: { $exists: false }, deletedAt: null,
+    date: { $lte: today, $gte: addDays(today, -1) },
   }).limit(100);
   for (const b of candidates) {
     const due = scheduledAt(b);
