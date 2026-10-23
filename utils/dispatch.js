@@ -18,6 +18,7 @@ const TechnicianCancellation = require('../models/TechnicianCancellation');
 const autoAssign = require('./autoAssign');
 const wallet = require('./wallet');
 const { notifyUser, notifyTechnicianJob } = require('./notify');
+const dispatchWhatsApp = require('./dispatchWhatsApp');
 const { RIYADH_OFFSET_MS, riyadhDate, normalizeTime } = require('./schedule');
 
 const { OPEN_STATUSES } = autoAssign;
@@ -107,7 +108,10 @@ const matchingTechnicians = async (booking, { excludeIds = [] } = {}) => {
 const notifyOpen = async (booking, { late = false, excludeIds = [] } = {}) => {
   try {
     const techs = await matchingTechnicians(booking, { excludeIds });
-    techs.forEach(({ user }) => notifyTechnicianJob(user._id, booking, late ? 'late_offer' : 'offer').catch(() => {}));
+    techs.forEach(({ user }) => {
+      notifyTechnicianJob(user._id, booking, late ? 'late_offer' : 'offer').catch(() => {});
+      dispatchWhatsApp.offerToTechnician(user, booking, { late }).catch(() => {});
+    });
     return techs.length;
   } catch (e) {
     console.error('⚠️ Dispatch notify failed:', e.message);
@@ -248,6 +252,7 @@ const acceptOffer = async (bookingId, technicianId) => {
       data: { bookingId: String(updated._id), publicBookingId: updated.bookingId, orderNumber: updated.orderNumber, status: 'assigned', event: 'assigned' },
     }).catch(() => {});
   }
+  if (tech) dispatchWhatsApp.assignedToCustomer(updated, tech).catch(() => {});
   return { ok: true, booking: updated, technician: tech, takenOver: takingOver };
 };
 
@@ -312,6 +317,7 @@ const cancelByTechnician = async (bookingId, technicianId, reasonRaw) => {
     }).catch(() => {});
   }
 
+  dispatchWhatsApp.technicianChangedToCustomer(updated).catch(() => {});
   // Open to everyone again (the technician who gave it back no longer sees it).
   const notified = await notifyOpen(updated);
   if (!notified) await alertAdmins(updated, 'was given back and has no other matching technician');
@@ -361,6 +367,7 @@ const flagLateJobs = async (now) => {
     );
     if (!flagged) continue;
     notifyTechnicianJob(flagged.technician, flagged, 'late').catch(() => {});
+    User.findById(flagged.technician).select('phone').lean().then((u) => u && dispatchWhatsApp.lateToTechnician(u, flagged)).catch(() => {});
     await notifyOpen(flagged, { late: true, excludeIds: [flagged.technician] });
   }
 };

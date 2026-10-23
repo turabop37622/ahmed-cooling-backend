@@ -164,7 +164,7 @@ router.get('/jobs/:id', async (req, res) => {
 // ---------- job offers (utils/dispatch.js) ----------
 // An offered booking shows the service, time, area and money, never the customer's phone or exact address: those
 // come with the job once it is accepted.
-const shapeOffer = (b, { km, late }, commissionAmount, busy, balance) => {
+const shapeOffer = (b, { km, late }, commissionAmount, busy, balance, frozen) => {
   const job = shapeJob(b);
   const canAfford = balance >= commissionAmount;
   return {
@@ -173,8 +173,8 @@ const shapeOffer = (b, { km, late }, commissionAmount, busy, balance) => {
     city: job.city, totalAmount: job.totalAmount, currency: job.currency, priority: job.priority,
     distanceKm: km, late: !!late, commissionToHold: commissionAmount,
     // Everyone nearby sees every open booking; these say whether this technician can take it right now.
-    canAccept: !busy && canAfford,
-    blockedReason: busy ? 'busy' : canAfford ? null : 'balance',
+    canAccept: !frozen && !busy && canAfford,
+    blockedReason: frozen ? 'frozen' : busy ? 'busy' : canAfford ? null : 'balance',
   };
 };
 
@@ -184,15 +184,17 @@ router.get('/offers', async (req, res) => {
   try {
     const lat = Number(req.query.lat);
     const lng = Number(req.query.lng);
-    const [open, balance, rate, busyJob] = await Promise.all([
+    const [open, balance, rate, busyJob, me] = await Promise.all([
       dispatch.openBookingsFor(req.user.id, { lat: Number.isFinite(lat) ? lat : undefined, lng: Number.isFinite(lng) ? lng : undefined }),
       wallet.balanceOf(req.user.id),
       getCommissionRate(),
       Booking.findOne({ technician: req.user.id, status: { $in: OPEN }, ...NOT_DELETED }).select('_id').lean(),
+      Technician.findOne({ user: req.user.id }).select('frozenUntil').lean(),
     ]);
+    const frozenUntil = me && me.frozenUntil && new Date(me.frozenUntil) > new Date() ? me.frozenUntil : null;
     res.json({
-      success: true, balance, busy: !!busyJob,
-      offers: open.map((o) => shapeOffer(o.booking, o, Math.round((o.booking.totalAmount || 0) * rate * 100) / 100, !!busyJob, balance)),
+      success: true, balance, busy: !!busyJob, frozenUntil,
+      offers: open.map((o) => shapeOffer(o.booking, o, Math.round((o.booking.totalAmount || 0) * rate * 100) / 100, !!busyJob, balance, !!frozenUntil)),
     });
   } catch (err) {
     console.error('Technician offers error:', err.message);
