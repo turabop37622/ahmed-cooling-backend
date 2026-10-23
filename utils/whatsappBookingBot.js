@@ -29,8 +29,11 @@ const TEMPLATE_LANG = process.env.WHATSAPP_CONFIRM_TEMPLATE_LANG || 'ar';
 // Must match the payload/id configured on the template's two quick-reply buttons.
 const CONFIRM_PAYLOAD = process.env.WHATSAPP_CONFIRM_PAYLOAD || 'BOOKING_CONFIRM';
 const CANCEL_PAYLOAD = process.env.WHATSAPP_CANCEL_PAYLOAD || 'BOOKING_CANCEL';
-const DELAY_MIN = Number(process.env.WHATSAPP_BOOKING_CONFIRM_DELAY_MIN) || 5;
-const TICK_MS = 60 * 1000;
+// The confirmation request goes out within seconds of the booking (a few seconds' grace lets a customer who is
+// still editing or immediately cancelling it avoid a stray message).
+const configuredDelay = process.env.WHATSAPP_BOOKING_CONFIRM_DELAY_SEC;
+const DELAY_SEC = configuredDelay && Number(configuredDelay) >= 0 ? Number(configuredDelay) : 5;
+const TICK_MS = 5 * 1000;
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const SENDER_EMAIL = process.env.EMAIL_FROM || ADMIN_EMAIL;
@@ -111,7 +114,7 @@ const finalizeConfirm = async (confirmed, phone) => {
 };
 
 // ============================================
-// OUTGOING: the "please confirm" nudge, 5 min after a booking is created
+// OUTGOING: the "please confirm" nudge, seconds after a booking is created
 // ============================================
 // Atomically claims the booking (marks confirmationSentAt) so two overlapping ticks can never send it twice.
 const claimForConfirmationSend = (bookingId) => Booking.findOneAndUpdate(
@@ -160,7 +163,7 @@ const sendConfirmationRequest = async (booking) => {
 
 // Finds pending bookings old enough to nudge and haven't been sent one yet, claims + sends each.
 const tick = async () => {
-  const cutoff = new Date(Date.now() - DELAY_MIN * 60 * 1000);
+  const cutoff = new Date(Date.now() - DELAY_SEC * 1000);
   const candidates = await Booking.find({
     status: 'pending',
     deletedAt: null,
@@ -182,7 +185,7 @@ const startScheduler = () => {
     return;
   }
   timer = setInterval(() => { tick().catch((err) => console.error('❌ WhatsApp bot tick failed:', err.message)); }, TICK_MS);
-  console.log(`✅ WhatsApp booking-confirmation bot started (sends ${DELAY_MIN} min after a booking is created, checks every minute).`);
+  console.log(`✅ WhatsApp booking-confirmation bot started (sends about ${DELAY_SEC}s after a booking is created, checks every ${TICK_MS / 1000}s).`);
 };
 
 // ============================================
