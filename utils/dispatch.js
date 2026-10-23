@@ -1,13 +1,14 @@
 // Technician dispatch ("offer mode"). Instead of the server picking a technician (utils/autoAssign.js), a confirmed
-// booking is OFFERED to a few matching technicians; the first one to accept gets it. Rules:
+// booking is OPEN to every matching technician, nearest first, until one of them takes it. Rules:
+//   - there is no timer on an open booking: it stays visible to all of them until someone accepts (or it is cancelled);
+//     the admins are alerted if it waits openAlertMin minutes with no taker
 //   - a technician holds one open job at a time (assigned / on the way / in progress) until it is completed or given back
 //   - accepting sets the booking's commission aside from the technician's prepaid wallet (utils/wallet.js); a balance
 //     that cannot cover it, or a frozen account, cannot accept
-//   - offers expire after offerTimeoutMin; the next batch goes out, up to offerMaxRounds, then the admins are alerted
 //   - a technician can give a job back (reason required); the commission goes to admin review, and maxCancelsPerDay
 //     such cancellations in one (Riyadh) day freeze the account for freezeHours
-//   - a technician who has not started a job lateGraceMin after its scheduled time keeps it, but it is offered to
-//     others too; whoever accepts takes it over (the late technician's commission is returned)
+//   - a technician who has not started a job lateGraceMin after its scheduled time is told so, and the booking is open to
+//     the others too; whoever accepts takes it over (the late technician's commission is returned)
 // Everything is behind AppSetting.offerMode (default off), so the existing auto-assign keeps working until it is on.
 const Booking = require('../models/Booking');
 const Technician = require('../models/Technician');
@@ -25,7 +26,7 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 const DEFAULT_SETTINGS = Object.freeze({
-  offerMode: false, offerBatchSize: 3, offerTimeoutMin: 5, offerMaxRounds: 3,
+  offerMode: false, openAlertMin: 10,
   lateGraceMin: 15, maxCancelsPerDay: 3, freezeHours: 24, deferDays: 7,
 });
 
@@ -81,13 +82,14 @@ const notifyAdmins = async (title, message, data = {}) => {
 
 const frozenFilter = (now) => ({ $or: [{ frozenUntil: { $exists: false } }, { frozenUntil: null }, { frozenUntil: { $lte: now } }] });
 
-// ---------- who can be offered a booking ----------
+// ---------- who sees an open booking ----------
 
-// Technicians who may be offered `booking` right now, best first: active, available, not frozen, opted in to automatic
-// jobs, matching city + specialty, no open job, and a wallet that covers the commission.
-const eligibleTechnicians = async (booking, { exclude = [], limit = 3 } = {}) => {
+// Technician profiles that may see `booking`: opted in to automatic jobs, active, available, not frozen, matching city +
+// specialty, and not among the technicians it was hidden from. Returns [{ user, location }] (no balance / busy filter:
+// those only decide whether they can accept it).
+const matchingTechnicians = async (booking, { excludeIds = [] } = {}) => {
   const now = new Date();
-  const excluded = new Set(exclude.map(String));
+  const excluded = new Set([...excludeIds, ...(booking.hiddenFrom || [])].map(String));
   const city = autoAssign.bookingCity(booking);
   const category = autoAssign.bookingCategory(booking);
   const profiles = await Technician.find({
@@ -95,84 +97,63 @@ const eligibleTechnicians = async (booking, { exclude = [], limit = 3 } = {}) =>
   }).select('user cities skills currentLocation').lean();
   const matching = profiles.filter((p) => p.user && !excluded.has(String(p.user)) && autoAssign.profileMatches(p, city, category));
   if (!matching.length) return [];
-
   const users = await User.find({ _id: { $in: matching.map((p) => p.user) }, role: 'technician', isVerified: true })
     .select('fullName phone').lean();
-  if (!users.length) return [];
-  const ids = users.map((u) => u._id);
-  const [busyIds, balanceOf, need, lastAssigned] = await Promise.all([
-    Booking.distinct('technician', { technician: { $in: ids }, status: { $in: OPEN_STATUSES }, deletedAt: null }),
-    wallet.balances(ids),
-    wallet.holdFor(booking),
-    Booking.aggregate([
-      { $match: { technician: { $in: ids }, deletedAt: null } },
-      { $group: { _id: '$technician', at: { $max: '$assignedAt' } } },
-    ]),
-  ]);
-  const busy = new Set(busyIds.map(String));
-  const lastAt = new Map(lastAssigned.map((r) => [String(r._id), r.at ? new Date(r.at).getTime() : -Infinity]));
-  const profileOf = new Map(matching.map((p) => [String(p.user), p]));
-  const bLat = booking.coordinates && booking.coordinates.latitude;
-  const bLng = booking.coordinates && booking.coordinates.longitude;
-
-  return users
-    .filter((u) => !busy.has(String(u._id)) && (balanceOf.get(String(u._id)) || 0) >= need.amount)
-    .map((u) => {
-      const loc = profileOf.get(String(u._id))?.currentLocation?.coordinates || [];
-      const km = hasCoords(bLat, bLng) && hasCoords(loc[1], loc[0]) ? distanceKm(bLat, bLng, loc[1], loc[0]) : null;
-      return { user: u, km, last: lastAt.get(String(u._id)) ?? -Infinity };
-    })
-    .sort((a, b) => (a.km === null && b.km === null ? 0 : a.km === null ? 1 : b.km === null ? -1 : a.km - b.km)
-      || (a.last - b.last) || String(a.user._id).localeCompare(String(b.user._id)))
-    .slice(0, limit)
-    .map((c) => c.user);
+  const locOf = new Map(matching.map((p) => [String(p.user), p.currentLocation && p.currentLocation.coordinates]));
+  return users.map((u) => ({ user: u, location: locOf.get(String(u._id)) || [] }));
 };
 
-// ---------- offering ----------
-
-// Sends the booking to the next batch of technicians. Returns { offered }. Never throws.
-const startOffers = async (booking, { late = false, excludeIds = [] } = {}) => {
+// Tells every matching technician about the open booking (push). Returns how many were told. Never throws.
+const notifyOpen = async (booking, { late = false, excludeIds = [] } = {}) => {
   try {
-    const s = await getSettings();
-    const alreadyOffered = (booking.offers || []).map((o) => String(o.technician));
-    const exclude = [...alreadyOffered, ...excludeIds.map(String), booking.technician ? String(booking.technician) : null].filter(Boolean);
-    const candidates = await eligibleTechnicians(booking, { exclude, limit: s.offerBatchSize });
-    if (!candidates.length) return { offered: 0 };
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + s.offerTimeoutMin * MINUTE);
-    const entries = candidates.map((u) => ({ technician: u._id, offeredAt: now, expiresAt, late, response: 'pending' }));
-    const updated = await Booking.findOneAndUpdate(
-      {
-        _id: booking._id, deletedAt: null,
-        $or: [{ status: 'confirmed', technician: null }, { status: 'assigned', lateOfferedAt: { $ne: null } }],
-      },
-      { $push: { offers: { $each: entries } }, $inc: { offerRound: 1 }, $unset: { offersExhaustedAt: 1 } },
-      { new: true }
-    );
-    if (!updated) return { offered: 0 };
-    candidates.forEach((u) => notifyTechnicianJob(u._id, updated, late ? 'late_offer' : 'offer').catch(() => {}));
-    return { offered: candidates.length, booking: updated };
+    const techs = await matchingTechnicians(booking, { excludeIds });
+    techs.forEach(({ user }) => notifyTechnicianJob(user._id, booking, late ? 'late_offer' : 'offer').catch(() => {}));
+    return techs.length;
   } catch (e) {
-    console.error('⚠️ Dispatch offer failed:', e.message);
-    return { offered: 0 };
+    console.error('⚠️ Dispatch notify failed:', e.message);
+    return 0;
   }
 };
 
-// When nobody can be offered the booking (or every round went unanswered) the admins are told once.
-const markExhausted = async (booking) => {
+// The open bookings one technician can see, nearest first (bookings without a known place come last, oldest first).
+// `from` = { lat, lng } of the technician (their phone); otherwise their last saved location.
+const openBookingsFor = async (technicianId, from = {}) => {
+  const profile = await Technician.findOne({ user: technicianId, autoAssign: true, active: { $ne: false } })
+    .select('cities skills currentLocation frozenUntil').lean();
+  if (!profile) return [];
+  const rows = await Booking.find({
+    deletedAt: null, hiddenFrom: { $ne: technicianId },
+    $or: [{ status: 'confirmed', technician: null }, { status: 'assigned', lateOfferedAt: { $ne: null }, technician: { $ne: technicianId } }],
+  }).sort({ createdAt: 1 }).limit(100).lean();
+  const mine = rows.filter((b) => autoAssign.profileMatches(profile, autoAssign.bookingCity(b), autoAssign.bookingCategory(b)));
+  const loc = profile.currentLocation && profile.currentLocation.coordinates ? profile.currentLocation.coordinates : [];
+  const lat = Number.isFinite(from.lat) ? from.lat : loc[1];
+  const lng = Number.isFinite(from.lng) ? from.lng : loc[0];
+  return mine
+    .map((b) => {
+      const bLat = b.coordinates && b.coordinates.latitude;
+      const bLng = b.coordinates && b.coordinates.longitude;
+      const km = hasCoords(lat, lng) && hasCoords(bLat, bLng) ? Math.round(distanceKm(lat, lng, bLat, bLng) * 10) / 10 : null;
+      return { booking: b, km, late: b.status === 'assigned' };
+    })
+    .sort((a, b) => (a.km === null && b.km === null ? 0 : a.km === null ? 1 : b.km === null ? -1 : a.km - b.km));
+};
+
+// When nobody matches the booking at all, or it waited openAlertMin minutes, the admins are told once.
+const alertAdmins = async (booking, why) => {
   const flagged = await Booking.findOneAndUpdate(
-    { _id: booking._id, offersExhaustedAt: { $exists: false }, status: 'confirmed', technician: null, deletedAt: null },
-    { $set: { offersExhaustedAt: new Date() } },
+    { _id: booking._id, openAlertedAt: { $exists: false }, status: 'confirmed', technician: null, deletedAt: null },
+    { $set: { openAlertedAt: new Date() } },
     { new: true }
   );
   if (flagged) {
-    await notifyAdmins('No technician took a booking', `Booking #${flagged.orderNumber} (${flagged.date || 'no date'} ${flagged.time || ''}) was offered but nobody accepted. Please assign it manually.`, { bookingId: String(flagged._id), kind: 'dispatch_exhausted' });
+    await notifyAdmins('Booking waiting for a technician', `Booking #${flagged.orderNumber} (${flagged.date || 'no date'} ${flagged.time || ''}) ${why}. Please assign it manually.`, { bookingId: String(flagged._id), kind: 'dispatch_waiting' });
   }
 };
 
 // Entry point when a booking becomes ready for a technician (created by a customer on WhatsApp, or confirmed).
 // Offer mode off: the old automatic assignment, returned as { mode: 'auto', booking, technician }.
-// Offer mode on: pending -> confirmed, then offered; returns { mode: 'offer', booking, offered }.
+// Offer mode on: pending -> confirmed, then open to every matching technician; returns { mode: 'offer', booking, notified }.
 const dispatch = async (booking, { fromStatus = 'pending' } = {}) => {
   const s = await getSettings();
   if (!s.offerMode) {
@@ -180,21 +161,21 @@ const dispatch = async (booking, { fromStatus = 'pending' } = {}) => {
     return auto ? { mode: 'auto', ...auto } : null;
   }
   if (!booking || !booking._id || booking.technician) return null;
-  let current = booking;
+  const now = new Date();
+  let current;
   if (booking.status === 'pending') {
-    const now = new Date();
     current = await Booking.findOneAndUpdate(
       { _id: booking._id, status: 'pending', technician: null, deletedAt: null },
-      { $set: { status: 'confirmed' }, $push: { statusHistory: { status: 'confirmed', timestamp: now, note: 'Auto-confirmed (offered to technicians)', actorRole: 'system' } } },
+      { $set: { status: 'confirmed', openedAt: now }, $push: { statusHistory: { status: 'confirmed', timestamp: now, note: 'Auto-confirmed (open to technicians)', actorRole: 'system' } } },
       { new: true }
     );
-    if (!current) return null;
-  } else if (booking.status !== 'confirmed') {
-    return null;
+  } else if (booking.status === 'confirmed') {
+    current = await Booking.findOneAndUpdate({ _id: booking._id, status: 'confirmed', technician: null, deletedAt: null }, { $set: { openedAt: now } }, { new: true });
   }
-  const result = await startOffers(current);
-  if (!result.offered) await markExhausted(current);
-  return { mode: 'offer', booking: result.booking || current, offered: result.offered };
+  if (!current) return null;
+  const notified = await notifyOpen(current);
+  if (!notified) await alertAdmins(current, 'has no matching technician');
+  return { mode: 'offer', booking: current, notified };
 };
 
 // ---------- accepting / declining ----------
@@ -205,12 +186,13 @@ const ERR = {
   balance: 'Your wallet balance is too low — please top up',
   gone: 'This booking is no longer available',
   profile: 'Technician account is not active',
+  area: 'This booking is outside your area or specialty',
 };
 
 // Claims the booking for the technician. Returns { ok: true, booking } or { ok: false, code, message }.
 const acceptOffer = async (bookingId, technicianId) => {
   const now = new Date();
-  const profile = await Technician.findOne({ user: technicianId }).select('active frozenUntil frozenReason').lean();
+  const profile = await Technician.findOne({ user: technicianId }).select('active frozenUntil cities skills').lean();
   if (!profile || profile.active === false) return { ok: false, code: 'profile', message: ERR.profile };
   if (profile.frozenUntil && new Date(profile.frozenUntil) > now) {
     return { ok: false, code: 'frozen', message: ERR.frozen, frozenUntil: profile.frozenUntil };
@@ -220,6 +202,9 @@ const acceptOffer = async (bookingId, technicianId) => {
 
   const before = await Booking.findOne({ _id: bookingId, deletedAt: null });
   if (!before) return { ok: false, code: 'gone', message: ERR.gone };
+  if (!autoAssign.profileMatches(profile, autoAssign.bookingCity(before), autoAssign.bookingCategory(before))) {
+    return { ok: false, code: 'area', message: ERR.area };
+  }
   const { amount: need } = await wallet.holdFor(before);
   const balance = await wallet.balanceOf(technicianId);
   if (balance < need) return { ok: false, code: 'balance', message: ERR.balance, balance, required: need };
@@ -232,25 +217,18 @@ const acceptOffer = async (bookingId, technicianId) => {
   }];
   const updated = await Booking.findOneAndUpdate(
     {
-      _id: bookingId, deletedAt: null,
-      offers: { $elemMatch: { technician: technicianId, response: 'pending', expiresAt: { $gt: now } } },
+      _id: bookingId, deletedAt: null, hiddenFrom: { $ne: technicianId },
       $or: [{ status: 'confirmed', technician: null }, { status: 'assigned', lateOfferedAt: { $ne: null }, technician: { $ne: technicianId } }],
     },
     {
-      $set: { status: 'assigned', technician: technicianId, assignedBy: 'offer', assignedAt: now, 'offers.$[mine].response': 'accepted', 'offers.$[mine].respondedAt': now },
-      $unset: { lateOfferedAt: 1, offersExhaustedAt: 1 },
+      $set: { status: 'assigned', technician: technicianId, assignedBy: 'offer', assignedAt: now },
+      $unset: { lateOfferedAt: 1, openAlertedAt: 1 },
+      ...(previousTechnician ? { $addToSet: { hiddenFrom: previousTechnician } } : {}),
       $push: { statusHistory: { $each: history } },
     },
-    { new: true, arrayFilters: [{ 'mine.technician': technicianId, 'mine.response': 'pending' }] }
+    { new: true }
   );
   if (!updated) return { ok: false, code: 'gone', message: ERR.gone };
-
-  // Everyone else's open offers for this booking are over.
-  await Booking.updateOne(
-    { _id: updated._id },
-    { $set: { 'offers.$[p].response': 'taken', 'offers.$[p].respondedAt': now } },
-    { arrayFilters: [{ 'p.response': 'pending' }] }
-  );
 
   if (takingOver && previousTechnician) {
     await wallet.releaseHold(before, { note: `Commission returned: #${before.orderNumber} was taken over (late)`, technicianId: before.technician });
@@ -273,32 +251,10 @@ const acceptOffer = async (bookingId, technicianId) => {
   return { ok: true, booking: updated, technician: tech, takenOver: takingOver };
 };
 
-// The technician says no to an offer; if nobody else is still considering the booking, the next batch goes out now.
+// "Not for me": the booking disappears from this technician's list only.
 const declineOffer = async (bookingId, technicianId) => {
-  const now = new Date();
-  const updated = await Booking.findOneAndUpdate(
-    { _id: bookingId, deletedAt: null, offers: { $elemMatch: { technician: technicianId, response: 'pending' } } },
-    { $set: { 'offers.$[mine].response': 'declined', 'offers.$[mine].respondedAt': now } },
-    { new: true, arrayFilters: [{ 'mine.technician': technicianId, 'mine.response': 'pending' }] }
-  );
-  if (!updated) return { ok: false };
-  await advanceIfUnanswered(updated);
-  return { ok: true };
-};
-
-// Booking still waiting for a taker and no offer is open: send the next batch, or give up after offerMaxRounds.
-const advanceIfUnanswered = async (booking) => {
-  const waiting = booking.status === 'confirmed' && !booking.technician;
-  const lateOpen = booking.status === 'assigned' && !!booking.lateOfferedAt;
-  if (!waiting && !lateOpen) return;
-  if ((booking.offers || []).some((o) => o.response === 'pending')) return;
-  const s = await getSettings();
-  if ((booking.offerRound || 0) >= s.offerMaxRounds) {
-    if (waiting) await markExhausted(booking);
-    return;
-  }
-  const result = await startOffers(booking, { late: lateOpen });
-  if (!result.offered && waiting) await markExhausted(booking);
+  const r = await Booking.updateOne({ _id: bookingId, deletedAt: null }, { $addToSet: { hiddenFrom: technicianId } });
+  return { ok: r.matchedCount > 0 };
 };
 
 // ---------- technician gives a booking back ----------
@@ -314,8 +270,9 @@ const cancelByTechnician = async (bookingId, technicianId, reasonRaw) => {
   const updated = await Booking.findOneAndUpdate(
     { _id: before._id, technician: technicianId, status: { $in: ['assigned', 'on_the_way'] }, deletedAt: null },
     {
-      $set: { status: 'confirmed', offers: [], offerRound: 0 },
-      $unset: { technician: 1, assignedBy: 1, assignedAt: 1, lateOfferedAt: 1, offersExhaustedAt: 1 },
+      $set: { status: 'confirmed', openedAt: now },
+      $unset: { technician: 1, assignedBy: 1, assignedAt: 1, lateOfferedAt: 1, openAlertedAt: 1 },
+      $addToSet: { hiddenFrom: technicianId },
       $push: { statusHistory: { status: 'confirmed', timestamp: now, note: `${tech?.fullName || 'Technician'} gave the booking back: ${reason}`, actorRole: 'technician', actor: technicianId } },
     },
     { new: true }
@@ -355,10 +312,9 @@ const cancelByTechnician = async (bookingId, technicianId, reasonRaw) => {
     }).catch(() => {});
   }
 
-  // Offer it again, never to someone who already gave this booking back.
-  const cancellers = (await TechnicianCancellation.find({ booking: before._id }).select('technician').lean()).map((c) => String(c.technician));
-  const result = await startOffers(updated, { excludeIds: cancellers });
-  if (!result.offered) await markExhausted(updated);
+  // Open to everyone again (the technician who gave it back no longer sees it).
+  const notified = await notifyOpen(updated);
+  if (!notified) await alertAdmins(updated, 'was given back and has no other matching technician');
   return { ok: true, cancellation, frozenUntil, cancellationsToday: today };
 };
 
@@ -389,18 +345,6 @@ const reviewCancellation = async (cancellationId, decision, adminId, adminNote =
 
 // ---------- the background tick ----------
 
-const expireOffers = async (now) => {
-  const due = await Booking.find({ deletedAt: null, offers: { $elemMatch: { response: 'pending', expiresAt: { $lte: now } } } }).limit(50);
-  for (const b of due) {
-    const updated = await Booking.findOneAndUpdate(
-      { _id: b._id },
-      { $set: { 'offers.$[o].response': 'expired', 'offers.$[o].respondedAt': now } },
-      { new: true, arrayFilters: [{ 'o.response': 'pending', 'o.expiresAt': { $lte: now } }] }
-    );
-    if (updated) await advanceIfUnanswered(updated);
-  }
-};
-
 const flagLateJobs = async (now) => {
   const s = await getSettings();
   const today = riyadhDate(now);
@@ -417,8 +361,18 @@ const flagLateJobs = async (now) => {
     );
     if (!flagged) continue;
     notifyTechnicianJob(flagged.technician, flagged, 'late').catch(() => {});
-    await startOffers(flagged, { late: true });
+    await notifyOpen(flagged, { late: true, excludeIds: [flagged.technician] });
   }
+};
+
+// Open bookings nobody took within openAlertMin minutes: the admins are told once.
+const alertStaleOpen = async (now) => {
+  const s = await getSettings();
+  const stale = await Booking.find({
+    status: 'confirmed', technician: null, deletedAt: null, openAlertedAt: { $exists: false },
+    openedAt: { $lte: new Date(now.getTime() - s.openAlertMin * MINUTE) },
+  }).limit(50);
+  for (const b of stale) await alertAdmins(b, `has waited ${s.openAlertMin} minutes without a technician`);
 };
 
 const autoRefundDeferred = async (now) => {
@@ -438,8 +392,8 @@ const tick = async () => {
     const s = await getSettings();
     const now = new Date();
     if (s.offerMode) {
-      await expireOffers(now);
       await flagLateJobs(now);
+      await alertStaleOpen(now);
     }
     await autoRefundDeferred(now);
   } catch (e) {
@@ -453,11 +407,11 @@ let timer = null;
 const startScheduler = () => {
   if (timer) return;
   timer = setInterval(() => { tick().catch(() => {}); }, 30 * 1000);
-  console.log('✅ Technician dispatch scheduler started (offer expiry, late jobs, deferred refunds — every 30s).');
+  console.log('✅ Technician dispatch scheduler started (late jobs, waiting-booking alerts, deferred refunds — every 30s).');
 };
 
 module.exports = {
   DEFAULT_SETTINGS, getSettings, clearSettingsCache, scheduledAt, startOfRiyadhDay,
-  eligibleTechnicians, startOffers, dispatch, acceptOffer, declineOffer, cancelByTechnician, reviewCancellation,
+  matchingTechnicians, notifyOpen, openBookingsFor, dispatch, acceptOffer, declineOffer, cancelByTechnician, reviewCancellation,
   tick, startScheduler,
 };

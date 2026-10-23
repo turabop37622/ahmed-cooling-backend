@@ -164,31 +164,35 @@ router.get('/jobs/:id', async (req, res) => {
 // ---------- job offers (utils/dispatch.js) ----------
 // An offered booking shows the service, time, area and money, never the customer's phone or exact address: those
 // come with the job once it is accepted.
-const shapeOffer = (b, offer, commissionAmount) => {
+const shapeOffer = (b, { km, late }, commissionAmount, busy, balance) => {
   const job = shapeJob(b);
+  const canAfford = balance >= commissionAmount;
   return {
     _id: job._id, orderNumber: job.orderNumber, date: job.date, time: job.time, service: job.service,
     area: job.city || String(job.address || '').split(',')[0].trim().slice(0, 40),
     city: job.city, totalAmount: job.totalAmount, currency: job.currency, priority: job.priority,
-    late: !!(offer && offer.late), expiresAt: offer ? offer.expiresAt : null, commissionToHold: commissionAmount,
+    distanceKm: km, late: !!late, commissionToHold: commissionAmount,
+    // Everyone nearby sees every open booking; these say whether this technician can take it right now.
+    canAccept: !busy && canAfford,
+    blockedReason: busy ? 'busy' : canAfford ? null : 'balance',
   };
 };
 
+// Every open booking this technician can see (their city + specialties), nearest first. The app may pass its
+// position as ?lat=&lng=; the booking stays here until another technician takes it or the booking is cancelled.
 router.get('/offers', async (req, res) => {
   try {
-    const now = new Date();
-    const rows = await Booking.find({
-      ...NOT_DELETED,
-      offers: { $elemMatch: { technician: req.user.id, response: 'pending', expiresAt: { $gt: now } } },
-      $or: [{ status: 'confirmed', technician: null }, { status: 'assigned', lateOfferedAt: { $ne: null } }],
-    }).select(JOB_FIELDS + ' offers').sort({ date: 1, createdAt: 1 }).limit(10).lean();
-    const [balance, rate] = await Promise.all([wallet.balanceOf(req.user.id), getCommissionRate()]);
+    const lat = Number(req.query.lat);
+    const lng = Number(req.query.lng);
+    const [open, balance, rate, busyJob] = await Promise.all([
+      dispatch.openBookingsFor(req.user.id, { lat: Number.isFinite(lat) ? lat : undefined, lng: Number.isFinite(lng) ? lng : undefined }),
+      wallet.balanceOf(req.user.id),
+      getCommissionRate(),
+      Booking.findOne({ technician: req.user.id, status: { $in: OPEN }, ...NOT_DELETED }).select('_id').lean(),
+    ]);
     res.json({
-      success: true, balance,
-      offers: rows.map((b) => {
-        const mine = (b.offers || []).find((o) => String(o.technician) === req.user.id && o.response === 'pending');
-        return shapeOffer(b, mine, Math.round((b.totalAmount || 0) * rate * 100) / 100);
-      }),
+      success: true, balance, busy: !!busyJob,
+      offers: open.map((o) => shapeOffer(o.booking, o, Math.round((o.booking.totalAmount || 0) * rate * 100) / 100, !!busyJob, balance)),
     });
   } catch (err) {
     console.error('Technician offers error:', err.message);
@@ -196,7 +200,7 @@ router.get('/offers', async (req, res) => {
   }
 });
 
-const dispatchStatus = { frozen: 403, busy: 409, balance: 402, gone: 409, profile: 403, reason: 400 };
+const dispatchStatus = { frozen: 403, busy: 409, balance: 402, gone: 409, profile: 403, area: 403, reason: 400 };
 
 router.post('/offers/:id/accept', async (req, res) => {
   try {

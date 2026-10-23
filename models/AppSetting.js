@@ -9,9 +9,8 @@ const appSettingSchema = new mongoose.Schema({
   commissionRate: { type: Number, default: DEFAULT_COMMISSION_RATE, min: 0, max: 0.5 },
   // Technician dispatch (utils/dispatch.js). While offerMode is off, bookings are auto-assigned as before.
   offerMode: { type: Boolean, default: false },
-  offerBatchSize: { type: Number, default: 3, min: 1, max: 10 },
-  offerTimeoutMin: { type: Number, default: 5, min: 1, max: 120 },
-  offerMaxRounds: { type: Number, default: 3, min: 1, max: 10 },
+  // Minutes an open booking may wait for a technician before the admins are alerted.
+  openAlertMin: { type: Number, default: 10, min: 1, max: 240 },
   lateGraceMin: { type: Number, default: 15, min: 1, max: 240 },
   maxCancelsPerDay: { type: Number, default: 3, min: 1, max: 20 },
   freezeHours: { type: Number, default: 24, min: 1, max: 720 },

@@ -193,7 +193,7 @@ router.post('/technician-cancellations/:id/review', async (req, res) => {
 // ---------- dispatch settings ----------
 
 const SETTING_LIMITS = {
-  offerBatchSize: [1, 10], offerTimeoutMin: [1, 120], offerMaxRounds: [1, 10],
+  openAlertMin: [1, 240],
   lateGraceMin: [1, 240], maxCancelsPerDay: [1, 20], freezeHours: [1, 720], deferDays: [1, 60],
 };
 

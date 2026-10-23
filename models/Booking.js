@@ -72,20 +72,12 @@
         prepaid: Boolean
       },
 
-      // Dispatch (utils/dispatch.js): the technicians a booking was offered to, and the commission set aside from
-      // the picking technician's wallet.
-      offers: [{
-        technician: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-        offeredAt: Date,
-        expiresAt: Date,
-        late: Boolean,
-        response: { type: String, enum: ['pending', 'accepted', 'declined', 'expired', 'taken'], default: 'pending' },
-        respondedAt: Date,
-        _id: false
-      }],
-      offerRound: { type: Number, default: 0 },
-      offersExhaustedAt: { type: Date },
-      // Set when the assigned technician is late and the booking was offered to others as well.
+      // Dispatch (utils/dispatch.js): an unassigned confirmed booking is open to every matching technician until one
+      // takes it. hiddenFrom = technicians who dismissed it, gave it back, or lost it for being late (not shown again).
+      hiddenFrom: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+      openedAt: { type: Date },
+      openAlertedAt: { type: Date },
+      // Set when the assigned technician is late: the booking is then open to the other technicians as well.
       lateOfferedAt: { type: Date },
       commissionHold: {
         technician: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
