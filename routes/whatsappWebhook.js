@@ -106,6 +106,12 @@ const handleMessage = async (message, waId, customerName) => {
 
   // A menu/language tap always wins (it also abandons a half-finished booking chat); otherwise a booking chat in
   // progress owns the reply, then the front door, then the AI.
+  // Picking a language while a booking is half done switches language and carries on with the booking.
+  if ((id === 'lang_en' || id === 'lang_ar') && conversation.bookingDraft?.step) {
+    await store.setLanguage(phone, id === 'lang_ar' ? 'ar' : 'en');
+    await bookingFlow.resume(phone, id === 'lang_ar');
+    return;
+  }
   const menuTap = !!id && /^(menu_|lang_)/.test(id);
   if (!menuTap && conversation.bookingDraft?.step) {
     if (!id && await handleInterruption(phone, text, conversation)) return;

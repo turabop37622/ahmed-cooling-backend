@@ -86,6 +86,7 @@ const replyDateList = async (phone, isAr) => {
   const bodyText = L(isAr, 'Great. Pick a date for the visit:', 'ممتاز. اختر تاريخ الزيارة:');
   await sendListMessage(phone, bodyText, L(isAr, 'Choose date', 'اختر التاريخ'), [{ rows }]);
   await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
+  await replyNav(phone, isAr, 'date');
 };
 
 const replyTimeList = async (phone, isAr, date) => {
@@ -98,6 +99,17 @@ const replyTimeList = async (phone, isAr, date) => {
   const bodyText = L(isAr, 'What time suits you?', 'ما الوقت المناسب لك؟');
   await sendListMessage(phone, bodyText, L(isAr, 'Choose time', 'اختر الوقت'), [{ rows }]);
   await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
+  await replyNav(phone, isAr, 'time');
+};
+
+// A list (or location request) can't carry reply buttons itself, so the way out of each step — go back, main menu,
+// change language — follows it as a small second message. The first step has nothing to go back to.
+const replyNav = async (phone, isAr, step) => {
+  const buttons = [];
+  if (step !== 'service') buttons.push({ id: 'nav_back', title: L(isAr, '⬅ Back', '⬅ رجوع') });
+  buttons.push({ id: 'menu_main', title: L(isAr, '☰ Main menu', '☰ القائمة') });
+  buttons.push({ id: 'menu_lang', title: L(isAr, '🌐 Language', '🌐 اللغة') });
+  await replyButtons(phone, L(isAr, 'Need to go back or change something?', 'تريد الرجوع أو التغيير؟'), buttons);
 };
 
 const replyConfirm = async (phone, d, isAr) => {
@@ -122,6 +134,7 @@ const replyServiceList = async (phone, isAr) => {
   }));
   await sendListMessage(phone, bodyText, L(isAr, 'View services', 'عرض الخدمات'), [{ rows }]);
   await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
+  await replyNav(phone, isAr, 'service');
 };
 
 // A real "year-month-day" only if that calendar date actually exists (isIsoDate round-trips it), else null.
@@ -246,6 +259,7 @@ const promptStep = async (phone, draft, isAr) => {
     } catch (err) {
       await reply(phone, body);
     }
+    await replyNav(phone, isAr, 'address');
   } else if (draft.step === 'confirm') await replyConfirm(phone, draft, isAr);
 };
 
@@ -266,7 +280,7 @@ const advanceDraft = async (phone, rawInput, draft, isAr) => {
   }
   if (!tappedStep) {
     const t = input.trim();
-    if (BACK_RE.test(t) && PREVIOUS_STEP[draft.step]) {
+    if ((t === 'nav_back' || BACK_RE.test(t)) && PREVIOUS_STEP[draft.step]) {
       await goToStep(phone, draft, PREVIOUS_STEP[draft.step], isAr);
       return;
     }

@@ -117,7 +117,8 @@ const bookingStatusReply = async (phone, lang) => {
 
 // ---------- menu taps ----------
 const handleMenuId = async (phone, id, conversation, lang) => {
-  if (id !== 'menu_book' && conversation?.bookingDraft?.step) await bookingFlow.clearDraft(phone);
+  // Changing language mid-booking keeps the booking (the webhook resumes it after the choice).
+  if (id !== 'menu_book' && id !== 'menu_lang' && conversation?.bookingDraft?.step) await bookingFlow.clearDraft(phone);
   switch (id) {
     case 'menu_book': await bookingFlow.startFlow(phone, lang === 'ar'); return true;
     case 'menu_services': await answer(phone, lang, faq.servicesOverview(lang)); return true;
@@ -167,7 +168,7 @@ const handle = async (phone, input, conversation) => {
   if (conversation) conversation.language = lang;
 
   if (input.startsWith('menu_')) return handleMenuId(phone, input, conversation, lang);
-  if (/^(svc_|date_|confirm_|lang_)/.test(input)) { await sendMainMenu(phone, lang); return true; } // a stale tap
+  if (/^(svc_|date_|time_|confirm_|nav_|lang_)/.test(input)) { await sendMainMenu(phone, lang); return true; } // a stale tap
 
   const norm = faq.normalize(input);
   if (!norm) return false;
