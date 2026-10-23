@@ -142,6 +142,9 @@ const sendConfirmationRequest = async (booking) => {
           { type: 'text', text: when },
         ],
       },
+      // Tell Meta exactly what each quick-reply button reports back, whatever its label says.
+      { type: 'button', sub_type: 'quick_reply', index: '0', parameters: [{ type: 'payload', payload: CONFIRM_PAYLOAD }] },
+      { type: 'button', sub_type: 'quick_reply', index: '1', parameters: [{ type: 'payload', payload: CANCEL_PAYLOAD }] },
     ]);
     await logMessage(phone, 'out', `[Template: ${TEMPLATE_NAME}] Please confirm booking ${booking.orderNumber || booking.bookingId}`, {
       messageType: 'template', sentBy: 'bot', customerName: booking.customerName,
