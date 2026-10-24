@@ -100,6 +100,11 @@ router.post(
         return bad(res, 409, 'An application with this number is already under review.', 'يوجد طلب بهذا الرقم قيد المراجعة بالفعل.');
       }
 
+      const pushToken = typeof body.pushToken === 'string' ? body.pushToken.trim() : '';
+      const pushTokens = pushToken.length >= 20 && pushToken.length <= 4096
+        ? [{ token: pushToken, kind: body.pushKind === 'expo' ? 'expo' : 'fcm', platform: ['android', 'ios'].includes(body.pushPlatform) ? body.pushPlatform : 'android' }]
+        : [];
+
       const stamp = Date.now();
       const [photo, idPhoto, idPhotoBack, passport, certificate] = await Promise.all([
         toCloudinary(photoFile, {
@@ -117,7 +122,7 @@ router.post(
       const application = await TechnicianApplication.create({
         fullName, phone, email, dateOfBirth, passwordHash: await bcrypt.hash(password, 10), cities, skills, experienceYears,
         about: cleanStr(body.about, 500), nationalId, idPhotoPublicId: idPhoto.public_id, idPhotoBackPublicId: idPhotoBack ? idPhotoBack.public_id : '', passportPublicId: passport.public_id, certificatePublicId: certificate.public_id,
-        photoUrl: photo.secure_url,
+        photoUrl: photo.secure_url, pushTokens,
       });
       res.status(201).json({
         success: true,

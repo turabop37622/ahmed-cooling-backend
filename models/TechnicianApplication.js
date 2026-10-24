@@ -22,6 +22,8 @@ const technicianApplicationSchema = new mongoose.Schema({
   passportPublicId: { type: String, default: '' },
   certificatePublicId: { type: String, default: '' },
   photoUrl: { type: String, required: true },
+  // The applicant's device (FCM / Expo token) so the approval or rejection reaches the phone before they have an account.
+  pushTokens: [{ token: String, kind: { type: String, enum: ['fcm', 'expo'] }, platform: String, _id: false }],
   status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending', index: true },
   rejectionReason: { type: String, trim: true, maxlength: 500, default: '' },
   reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },

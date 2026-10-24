@@ -10,6 +10,7 @@
 //   - a technician who has not started a job lateGraceMin after its scheduled time is told so, and the booking is open to
 //     the others too; whoever accepts takes it over (the late technician's commission is returned)
 // Everything is behind AppSetting.offerMode (default off), so the existing auto-assign keeps working until it is on.
+const mongoose = require('mongoose');
 const Booking = require('../models/Booking');
 const Technician = require('../models/Technician');
 const User = require('../models/User');
@@ -34,6 +35,9 @@ const DEFAULT_SETTINGS = Object.freeze({
 let settingsCache = { at: 0, value: DEFAULT_SETTINGS };
 const getSettings = async ({ fresh = false } = {}) => {
   if (!fresh && Date.now() - settingsCache.at < 15 * 1000) return settingsCache.value;
+  // Not connected to the database (it is down, or a test without one): use what we last knew instead of waiting for
+  // Mongoose's 10 s buffering timeout on every booking.
+  if (mongoose.connection.readyState !== 1) return settingsCache.value;
   try {
     const doc = await AppSetting.findOne({ key: 'app' }).lean();
     const value = { ...DEFAULT_SETTINGS };

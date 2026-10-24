@@ -10,6 +10,7 @@ const AuditLog = require('../models/AuditLog');
 const cloudinary = require('../utils/cloudinary');
 const { phoneVariants } = require('../utils/phone');
 const dispatchWhatsApp = require('../utils/dispatchWhatsApp');
+const { notifyUser, pushToTokens } = require('../utils/notify');
 
 const isObjectId = (v) => typeof v === 'string' && /^[a-f\d]{24}$/i.test(v);
 const serverError = (res) => res.status(500).json({ success: false, message: 'Server error' });
@@ -18,6 +19,24 @@ const STATUSES = ['pending', 'approved', 'rejected'];
 // A signed link to the private ID photo (only the admin panel ever gets one).
 const idPhotoUrl = (publicId) => cloudinary.url(publicId, { type: 'authenticated', sign_url: true, secure: true, resource_type: 'image', format: 'jpg' });
 
+// Tells the applicant the decision: push to the device they applied from, an in-app notification (waiting for them in
+// the technician app after their first login, when approved) and a WhatsApp message.
+const tellApplicant = async (application, approved, userId) => {
+  const title = approved ? 'Application approved' : 'Application not approved';
+  const titleAr = approved ? 'تمت الموافقة على طلبك' : 'لم تتم الموافقة على طلبك';
+  const message = approved
+    ? 'Welcome to Ahmed Cooling! Log in to the technician app with your mobile number and password.'
+    : `Your technician application was not approved: ${application.rejectionReason}`;
+  const messageAr = approved
+    ? 'مرحباً بك في أحمد للتبريد! سجّل الدخول إلى تطبيق الفنيين برقم جوالك وكلمة المرور.'
+    : `لم تتم الموافقة على طلبك: ${application.rejectionReason}`;
+  const data = { kind: 'application', status: approved ? 'approved' : 'rejected', titleAr, messageAr };
+  await Promise.all([
+    pushToTokens(application.pushTokens, { title: `${title} | ${titleAr}`, message: `${message}\n${messageAr}`, data }),
+    approved && userId ? notifyUser(userId, { type: 'system', title, titleAr, message, messageAr, data, priority: 'high' }) : null,
+    dispatchWhatsApp.applicationDecision(application, approved),
+  ].filter(Boolean).map((p) => Promise.resolve(p).catch(() => {})));
+};
 const shape = (a, { withId = false } = {}) => ({
   _id: a._id, fullName: a.fullName, phone: a.phone, email: a.email || '', cities: a.cities, skills: a.skills,
   experienceYears: a.experienceYears, about: a.about, nationalId: a.nationalId, dateOfBirth: a.dateOfBirth, photoUrl: a.photoUrl,
@@ -92,7 +111,7 @@ router.post('/technician-applications/:id/approve', async (req, res) => {
     a.reviewedAt = new Date();
     await a.save();
     await AuditLog.record({ actor: req.user.id, action: 'technician.application_approve', target: { kind: 'technician', id: String(user._id), label: a.fullName } });
-    dispatchWhatsApp.applicationDecision(a, true).catch(() => {});
+    tellApplicant(a, true, user._id).catch(() => {});
     res.json({ success: true, message: 'Approved — the technician can now log in', userId: String(user._id) });
   } catch (err) {
     if (err && err.code === 11000) return res.status(409).json({ success: false, message: 'An account with this phone number or email already exists' });
@@ -117,7 +136,7 @@ router.post('/technician-applications/:id/reject', async (req, res) => {
       try { await cloudinary.uploader.destroy(publicId, { type: 'authenticated', invalidate: true }); } catch (e) { console.warn('ID photo cleanup failed:', e.message); }
     }
     await AuditLog.record({ actor: req.user.id, action: 'technician.application_reject', target: { kind: 'technician', id: String(a._id), label: a.fullName }, after: { reason } });
-    dispatchWhatsApp.applicationDecision(a, false).catch(() => {});
+    tellApplicant(a, false).catch(() => {});
     res.json({ success: true, message: 'Application rejected' });
   } catch (err) {
     console.error('Admin application reject error:', err.message);

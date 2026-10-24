@@ -334,16 +334,22 @@ router.post('/phone/login', async (req, res) => {
     }
     if (!user) {
       // A technician who applied from the app and is not approved yet gets an explanation instead of "invalid".
-      const TechnicianApplication = require('../models/TechnicianApplication');
-      const applications = await TechnicianApplication.find({ phone: { $in: phoneVariants(phone) }, status: { $in: ['pending', 'rejected'] } })
-        .select('+passwordHash status rejectionReason').sort({ createdAt: -1 }).limit(3);
-      for (const application of applications) {
-        // eslint-disable-next-line no-await-in-loop
-        if (await require('bcryptjs').compare(password, application.passwordHash)) {
-          return res.status(403).json(application.status === 'pending'
-            ? { success: false, applicationStatus: 'pending', message: 'Your technician application is under review. Verification takes up to 2 working days; your account is activated once it is approved.', messageAr: 'طلب انضمامك كفني قيد المراجعة. يستغرق التحقق حتى يومي عمل، وسيتم تفعيل حسابك فور الموافقة.' }
-            : { success: false, applicationStatus: 'rejected', message: `Your technician application was not approved: ${application.rejectionReason || 'please contact us'}`, messageAr: `لم تتم الموافقة على طلبك كفني: ${application.rejectionReason || 'يرجى التواصل معنا'}` });
+      // The lookup must never turn a plain wrong password into an error, so any failure falls through to the 401 below.
+      try {
+        if (require('mongoose').connection.readyState !== 1) throw new Error('database not connected');
+        const TechnicianApplication = require('../models/TechnicianApplication');
+        const applications = await TechnicianApplication.find({ phone: { $in: phoneVariants(phone) }, status: { $in: ['pending', 'rejected'] } })
+          .select('+passwordHash status rejectionReason').sort({ createdAt: -1 }).limit(3);
+        for (const application of applications) {
+          // eslint-disable-next-line no-await-in-loop
+          if (await require('bcryptjs').compare(password, application.passwordHash)) {
+            return res.status(403).json(application.status === 'pending'
+              ? { success: false, applicationStatus: 'pending', message: 'Your technician application is under review. Verification takes up to 2 working days; your account is activated once it is approved.', messageAr: 'طلب انضمامك كفني قيد المراجعة. يستغرق التحقق حتى يومي عمل، وسيتم تفعيل حسابك فور الموافقة.' }
+              : { success: false, applicationStatus: 'rejected', message: `Your technician application was not approved: ${application.rejectionReason || 'please contact us'}`, messageAr: `لم تتم الموافقة على طلبك كفني: ${application.rejectionReason || 'يرجى التواصل معنا'}` });
+          }
         }
+      } catch (lookupError) {
+        console.warn('Technician application lookup skipped:', lookupError.message);
       }
       return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
     }

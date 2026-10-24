@@ -25,7 +25,7 @@ const getFcm = () => {
 };
 
 const pruneTokens = async (userId, tokens) => {
-  if (!tokens.length) return;
+  if (!userId || !tokens.length) return;
   try { await User.updateOne({ _id: userId }, { $pull: { pushTokens: { token: { $in: tokens } } } }); }
   catch (e) { console.log('[notify] token prune failed:', e.message); }
 };
@@ -169,4 +169,21 @@ const notifyTechnicianJob = (technicianId, booking, event) => {
   });
 };
 
-module.exports = { notifyUser, notifyTechnicianJob };
+// Push straight to device tokens that belong to no account yet (a technician who applied and is waiting for approval).
+// tokens: [{ token, kind: 'fcm' | 'expo' }]. Never throws.
+const pushToTokens = async (tokens, { title, message, data = {} }) => {
+  try {
+    const list = (tokens || []).filter((t) => t && typeof t.token === 'string' && t.token);
+    const expo = list.filter((t) => t.kind === 'expo').map((t) => t.token);
+    const fcm = list.filter((t) => t.kind === 'fcm').map((t) => t.token);
+    const payload = { title, message, data, priority: 'high' };
+    await Promise.all([
+      expo.length ? sendExpo(null, expo, payload).catch((e) => console.log('[notify] expo push failed:', e.message)) : null,
+      fcm.length ? sendFcm(null, fcm, payload).catch((e) => console.log('[notify] fcm push failed:', e.message)) : null,
+    ]);
+  } catch (e) {
+    console.log('[notify] pushToTokens failed:', e.message);
+  }
+};
+
+module.exports = { notifyUser, notifyTechnicianJob, pushToTokens };

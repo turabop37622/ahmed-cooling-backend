@@ -142,45 +142,13 @@ router.get('/technicians', async (req, res) => {
 const duplicateMessage = 'An account with this phone number or email already exists';
 const STAFF_ROLES = ['technician', 'admin'];
 
-router.post('/technicians', async (req, res) => {
-  try {
-    const parsed = parseTechnicianInput(req.body, { partial: false });
-    if (parsed.error) return badRequest(res, parsed.error);
-    const v = parsed.values;
-    // A customer account with the same number does not block it (the phone login picks the account whose password
-    // matches); only another technician or admin with this number does.
-    if (await User.findOne({ phone: { $in: phoneVariants(v.phone) }, role: { $in: STAFF_ROLES } }).select('_id').lean()) {
-      return res.status(409).json({ success: false, message: 'Another technician already uses this phone number' });
-    }
-    if (v.email && await User.findOne({ email: v.email }).select('_id').lean()) {
-      return res.status(409).json({ success: false, message: 'An account with this email already exists' });
-    }
-    const user = new User({
-      fullName: v.fullName, phone: v.phone, ...(v.email ? { email: v.email } : {}), password: v.password,
-      role: 'technician', authProvider: 'phone', isVerified: true, isPhoneVerified: true,
-    });
-    await user.save();
-    let profile;
-    try {
-      profile = await Technician.create({
-        user: user._id, cities: v.cities, skills: v.specialties, autoAssign: v.autoAssign, active: v.active, availability: v.availability,
-      });
-    } catch (e) {
-      await User.deleteOne({ _id: user._id }).catch(() => {});
-      throw e;
-    }
-    const technician = shapeTechnician(user.toObject(), profile.toObject(), null);
-    await AuditLog.record({
-      actor: req.user.id, action: 'technician.create',
-      target: { kind: 'technician', id: String(user._id), label: v.fullName }, after: auditView(technician),
-    });
-    res.status(201).json({ success: true, message: 'Technician created', technician });
-  } catch (err) {
-    if (err && err.code === 11000) return res.status(409).json({ success: false, message: duplicateMessage });
-    console.error('Admin technician create error:', err.message);
-    serverError(res);
-  }
-});
+// Technician accounts are created from the app only: the technician applies there and an admin approves the
+// application (routes/adminApplications.js). Nothing is created from the website or the admin panel any more.
+router.post('/technicians', (req, res) => res.status(403).json({
+  success: false,
+  message: 'Technician accounts are created from the app. Ask the technician to apply there, then approve the application under Technician applications.',
+  messageAr: 'يتم إنشاء حسابات الفنيين من التطبيق فقط. اطلب من الفني التقديم من التطبيق ثم وافق على الطلب من صفحة طلبات الفنيين.',
+}));
 
 router.patch('/technicians/:id', async (req, res) => {
   try {

@@ -1,6 +1,7 @@
 // WhatsApp messages for technician dispatch (utils/dispatch.js): an open job to the technicians, and "your technician is
 // ..." to the customer. These are business-initiated, so Meta needs an approved template outside the 24h window:
 //   WHATSAPP_TECH_OFFER_TEMPLATE        body: 3 variables  {{1}} service  {{2}} when  {{3}} area
+//   WHATSAPP_APPLICATION_RESULT_TEMPLATE body: 3 variables {{1}} name {{2}} approved / not approved {{3}} details (English | Arabic, one line)
 //   WHATSAPP_CUSTOMER_ASSIGNED_TEMPLATE body: 4 variables  {{1}} customer {{2}} order number {{3}} technician {{4}} technician phone
 // Both use WHATSAPP_DISPATCH_TEMPLATE_LANG (default en_US). While a template name is not configured, a plain text message
 // is tried instead (Meta delivers it only if the person messaged this number in the last 24 hours). A send never throws:
@@ -12,6 +13,7 @@ const { normalizePhone } = require('./phone');
 const LANG = process.env.WHATSAPP_DISPATCH_TEMPLATE_LANG || 'en_US';
 const TECH_OFFER_TEMPLATE = process.env.WHATSAPP_TECH_OFFER_TEMPLATE || '';
 const CUSTOMER_ASSIGNED_TEMPLATE = process.env.WHATSAPP_CUSTOMER_ASSIGNED_TEMPLATE || '';
+const APPLICATION_RESULT_TEMPLATE = process.env.WHATSAPP_APPLICATION_RESULT_TEMPLATE || '';
 
 const serviceName = (booking) => {
   const svc = booking.service && typeof booking.service === 'object' ? booking.service : {};
@@ -75,13 +77,15 @@ const technicianChangedToCustomer = (booking) => {
 
 // The applicant: the admin approved or rejected the technician application (plain text — it only lands if they messaged
 // us in the last 24 hours, otherwise the app login message explains the result).
-const applicationDecision = (application, approved) => send(
-  application.phone, '', [],
-  approved
-    ? `Hello ${application.fullName}, your Ahmed Cooling technician application was approved. Log in to the technician app with your phone number and password.
-مرحباً ${application.fullName}، تمت الموافقة على طلبك. سجّل الدخول في تطبيق الفنيين برقم جوالك وكلمة المرور.`
-    : `Hello ${application.fullName}, your Ahmed Cooling technician application was not approved: ${application.rejectionReason}
-مرحباً ${application.fullName}، لم تتم الموافقة على طلبك: ${application.rejectionReason}`
-);
+const applicationDecision = (application, approved) => {
+  const detail = approved
+    ? 'You can now log in to the technician app with your mobile number and password. | يمكنك الآن تسجيل الدخول إلى تطبيق الفنيين برقم جوالك وكلمة المرور.'
+    : `Reason: ${application.rejectionReason} | السبب: ${application.rejectionReason}`;
+  const text = approved
+    ? `Hello ${application.fullName}, your Ahmed Cooling technician application was approved. Log in to the technician app with your phone number and password.\nمرحباً ${application.fullName}، تمت الموافقة على طلبك. سجّل الدخول في تطبيق الفنيين برقم جوالك وكلمة المرور.`
+    : `Hello ${application.fullName}, your Ahmed Cooling technician application was not approved: ${application.rejectionReason}\nمرحباً ${application.fullName}، لم تتم الموافقة على طلبك: ${application.rejectionReason}`;
+  return send(application.phone, APPLICATION_RESULT_TEMPLATE,
+    [application.fullName, approved ? 'approved | تمت الموافقة' : 'not approved | لم تتم الموافقة', detail], text);
+};
 
 module.exports = { offerToTechnician, lateToTechnician, assignedToCustomer, technicianChangedToCustomer, applicationDecision };
