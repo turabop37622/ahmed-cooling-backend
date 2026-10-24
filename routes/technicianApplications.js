@@ -38,7 +38,10 @@ const toCloudinary = (file, options) => new Promise((resolve, reject) => {
 router.post(
   '/',
   applyLimiter,
-  upload.fields([{ name: 'photo', maxCount: 1 }, { name: 'idPhoto', maxCount: 1 }, { name: 'idPhotoBack', maxCount: 1 }]),
+  upload.fields([
+    { name: 'photo', maxCount: 1 }, { name: 'idPhoto', maxCount: 1 }, { name: 'idPhotoBack', maxCount: 1 },
+    { name: 'passportPhoto', maxCount: 1 }, { name: 'certificatePhoto', maxCount: 1 },
+  ]),
   async (req, res) => {
     try {
       const body = req.body || {};
@@ -50,7 +53,16 @@ router.post(
       const phone = normalizeAnyPhone(body.phone);
 
       const email = body.email ? normEmail(body.email) : '';
-      if (email && !isEmail(email)) return res.status(400).json({ success: false, message: 'Enter a valid email address' });
+      if (!email || !isEmail(email)) return res.status(400).json({ success: false, message: 'Enter a valid email address' });
+
+      // YYYY-MM-DD, a real date, and an adult of working age
+      const dobText = typeof body.dateOfBirth === 'string' ? body.dateOfBirth.trim() : '';
+      const dateOfBirth = /^\d{4}-\d{2}-\d{2}$/.test(dobText) ? new Date(`${dobText}T00:00:00Z`) : null;
+      if (!dateOfBirth || Number.isNaN(dateOfBirth.getTime()) || dateOfBirth.toISOString().slice(0, 10) !== dobText) {
+        return res.status(400).json({ success: false, message: 'Enter your date of birth' });
+      }
+      const age = (Date.now() - dateOfBirth.getTime()) / (365.25 * 24 * 3600 * 1000);
+      if (age < 18 || age > 70) return res.status(400).json({ success: false, message: 'You must be between 18 and 70 years old to apply' });
 
       const password = typeof body.password === 'string' ? body.password : '';
       if (password.length < 8 || password.length > 72) return res.status(400).json({ success: false, message: 'Password must be 8 to 72 characters' });
@@ -68,8 +80,12 @@ router.post(
       const photoFile = req.files && req.files.photo && req.files.photo[0];
       const idFile = req.files && req.files.idPhoto && req.files.idPhoto[0];
       const idBackFile = req.files && req.files.idPhotoBack && req.files.idPhotoBack[0];
+      const passportFile = req.files && req.files.passportPhoto && req.files.passportPhoto[0];
+      const certificateFile = req.files && req.files.certificatePhoto && req.files.certificatePhoto[0];
       if (!photoFile) return res.status(400).json({ success: false, message: 'Add your personal photo' });
       if (!idFile) return res.status(400).json({ success: false, message: 'Add a photo of your Iqama / ID' });
+      if (!passportFile) return res.status(400).json({ success: false, message: 'Add a photo of your passport' });
+      if (!certificateFile) return res.status(400).json({ success: false, message: 'Add a photo of your certificate' });
 
       // Same number already working for us, or already waiting for review
       if (await User.findOne({ phone: { $in: phoneVariants(phone) }, role: { $in: ['technician', 'admin'] } }).select('_id').lean()) {
@@ -80,7 +96,7 @@ router.post(
       }
 
       const stamp = Date.now();
-      const [photo, idPhoto, idPhotoBack] = await Promise.all([
+      const [photo, idPhoto, idPhotoBack, passport, certificate] = await Promise.all([
         toCloudinary(photoFile, {
           folder: 'ahmedcooling/technician-applications', public_id: `photo-${stamp}`, format: 'jpg',
           transformation: [{ width: 640, height: 640, crop: 'fill', gravity: 'face' }],
@@ -89,11 +105,14 @@ router.post(
         idBackFile
           ? toCloudinary(idBackFile, { folder: 'ahmedcooling/technician-ids', public_id: `id-back-${stamp}`, type: 'authenticated', format: 'jpg' })
           : Promise.resolve(null),
+        toCloudinary(passportFile, { folder: 'ahmedcooling/technician-ids', public_id: `passport-${stamp}`, type: 'authenticated', format: 'jpg' }),
+        toCloudinary(certificateFile, { folder: 'ahmedcooling/technician-ids', public_id: `certificate-${stamp}`, type: 'authenticated', format: 'jpg' }),
       ]);
 
       const application = await TechnicianApplication.create({
-        fullName, phone, email, passwordHash: await bcrypt.hash(password, 10), cities, skills, experienceYears,
-        about: cleanStr(body.about, 500), nationalId, idPhotoPublicId: idPhoto.public_id, idPhotoBackPublicId: idPhotoBack ? idPhotoBack.public_id : '', photoUrl: photo.secure_url,
+        fullName, phone, email, dateOfBirth, passwordHash: await bcrypt.hash(password, 10), cities, skills, experienceYears,
+        about: cleanStr(body.about, 500), nationalId, idPhotoPublicId: idPhoto.public_id, idPhotoBackPublicId: idPhotoBack ? idPhotoBack.public_id : '', passportPublicId: passport.public_id, certificatePublicId: certificate.public_id,
+        photoUrl: photo.secure_url,
       });
       res.status(201).json({
         success: true,

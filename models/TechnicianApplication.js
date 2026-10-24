@@ -13,10 +13,14 @@ const technicianApplicationSchema = new mongoose.Schema({
   experienceYears: { type: Number, min: 0, max: 60, default: 0 },
   about: { type: String, trim: true, maxlength: 500, default: '' },
   nationalId: { type: String, required: true, trim: true, maxlength: 30 },
+  dateOfBirth: { type: Date, required: true },
   // The ID photo is stored as a private ("authenticated") Cloudinary asset: only a signed link made for the admin shows it.
   idPhotoPublicId: { type: String, required: true },
   // Back of the Iqama / ID (private as well). Optional so older applications without it stay valid.
   idPhotoBackPublicId: { type: String, default: '' },
+  // Passport and skill certificate photos: private as well, shown to the admin through signed links only.
+  passportPublicId: { type: String, default: '' },
+  certificatePublicId: { type: String, default: '' },
   photoUrl: { type: String, required: true },
   status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending', index: true },
   rejectionReason: { type: String, trim: true, maxlength: 500, default: '' },
