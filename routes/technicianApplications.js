@@ -38,7 +38,7 @@ const toCloudinary = (file, options) => new Promise((resolve, reject) => {
 router.post(
   '/',
   applyLimiter,
-  upload.fields([{ name: 'photo', maxCount: 1 }, { name: 'idPhoto', maxCount: 1 }]),
+  upload.fields([{ name: 'photo', maxCount: 1 }, { name: 'idPhoto', maxCount: 1 }, { name: 'idPhotoBack', maxCount: 1 }]),
   async (req, res) => {
     try {
       const body = req.body || {};
@@ -67,6 +67,7 @@ router.post(
 
       const photoFile = req.files && req.files.photo && req.files.photo[0];
       const idFile = req.files && req.files.idPhoto && req.files.idPhoto[0];
+      const idBackFile = req.files && req.files.idPhotoBack && req.files.idPhotoBack[0];
       if (!photoFile) return res.status(400).json({ success: false, message: 'Add your personal photo' });
       if (!idFile) return res.status(400).json({ success: false, message: 'Add a photo of your Iqama / ID' });
 
@@ -79,17 +80,20 @@ router.post(
       }
 
       const stamp = Date.now();
-      const [photo, idPhoto] = await Promise.all([
+      const [photo, idPhoto, idPhotoBack] = await Promise.all([
         toCloudinary(photoFile, {
           folder: 'ahmedcooling/technician-applications', public_id: `photo-${stamp}`, format: 'jpg',
           transformation: [{ width: 640, height: 640, crop: 'fill', gravity: 'face' }],
         }),
         toCloudinary(idFile, { folder: 'ahmedcooling/technician-ids', public_id: `id-${stamp}`, type: 'authenticated', format: 'jpg' }),
+        idBackFile
+          ? toCloudinary(idBackFile, { folder: 'ahmedcooling/technician-ids', public_id: `id-back-${stamp}`, type: 'authenticated', format: 'jpg' })
+          : Promise.resolve(null),
       ]);
 
       const application = await TechnicianApplication.create({
         fullName, phone, email, passwordHash: await bcrypt.hash(password, 10), cities, skills, experienceYears,
-        about: cleanStr(body.about, 500), nationalId, idPhotoPublicId: idPhoto.public_id, photoUrl: photo.secure_url,
+        about: cleanStr(body.about, 500), nationalId, idPhotoPublicId: idPhoto.public_id, idPhotoBackPublicId: idPhotoBack ? idPhotoBack.public_id : '', photoUrl: photo.secure_url,
       });
       res.status(201).json({
         success: true,

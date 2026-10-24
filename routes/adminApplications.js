@@ -22,7 +22,7 @@ const shape = (a, { withId = false } = {}) => ({
   _id: a._id, fullName: a.fullName, phone: a.phone, email: a.email || '', cities: a.cities, skills: a.skills,
   experienceYears: a.experienceYears, about: a.about, nationalId: a.nationalId, photoUrl: a.photoUrl,
   status: a.status, rejectionReason: a.rejectionReason || '', reviewedAt: a.reviewedAt || null, user: a.user || null, createdAt: a.createdAt,
-  ...(withId ? { idPhotoUrl: idPhotoUrl(a.idPhotoPublicId) } : {}),
+  ...(withId ? { idPhotoUrl: idPhotoUrl(a.idPhotoPublicId), idPhotoBackUrl: a.idPhotoBackPublicId ? idPhotoUrl(a.idPhotoBackPublicId) : '' } : {}),
 });
 
 router.get('/technician-applications', async (req, res) => {
@@ -112,7 +112,9 @@ router.post('/technician-applications/:id/reject', async (req, res) => {
     );
     if (!a) return res.status(409).json({ success: false, message: 'This application was already decided' });
     // The ID document is not kept for people who were not accepted.
-    try { await cloudinary.uploader.destroy(a.idPhotoPublicId, { type: 'authenticated', invalidate: true }); } catch (e) { console.warn('ID photo cleanup failed:', e.message); }
+    for (const publicId of [a.idPhotoPublicId, a.idPhotoBackPublicId].filter(Boolean)) {
+      try { await cloudinary.uploader.destroy(publicId, { type: 'authenticated', invalidate: true }); } catch (e) { console.warn('ID photo cleanup failed:', e.message); }
+    }
     await AuditLog.record({ actor: req.user.id, action: 'technician.application_reject', target: { kind: 'technician', id: String(a._id), label: a.fullName }, after: { reason } });
     dispatchWhatsApp.applicationDecision(a, false).catch(() => {});
     res.json({ success: true, message: 'Application rejected' });

@@ -15,6 +15,8 @@ const technicianApplicationSchema = new mongoose.Schema({
   nationalId: { type: String, required: true, trim: true, maxlength: 30 },
   // The ID photo is stored as a private ("authenticated") Cloudinary asset: only a signed link made for the admin shows it.
   idPhotoPublicId: { type: String, required: true },
+  // Back of the Iqama / ID (private as well). Optional so older applications without it stay valid.
+  idPhotoBackPublicId: { type: String, default: '' },
   photoUrl: { type: String, required: true },
   status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending', index: true },
   rejectionReason: { type: String, trim: true, maxlength: 500, default: '' },
