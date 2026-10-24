@@ -332,7 +332,21 @@ router.post('/phone/login', async (req, res) => {
       // eslint-disable-next-line no-await-in-loop
       if (await candidate.comparePassword(password)) { user = candidate; break; }
     }
-    if (!user) return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
+    if (!user) {
+      // A technician who applied from the app and is not approved yet gets an explanation instead of "invalid".
+      const TechnicianApplication = require('../models/TechnicianApplication');
+      const applications = await TechnicianApplication.find({ phone: { $in: phoneVariants(phone) }, status: { $in: ['pending', 'rejected'] } })
+        .select('+passwordHash status rejectionReason').sort({ createdAt: -1 }).limit(3);
+      for (const application of applications) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await require('bcryptjs').compare(password, application.passwordHash)) {
+          return res.status(403).json(application.status === 'pending'
+            ? { success: false, applicationStatus: 'pending', message: 'Your technician application is under review. We will activate your account once it is approved.' }
+            : { success: false, applicationStatus: 'rejected', message: `Your technician application was not approved: ${application.rejectionReason || 'please contact us'}` });
+        }
+      }
+      return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
+    }
 
     if (user.role === 'admin') return res.status(403).json({ success: false, message: 'Use the admin login' });
 

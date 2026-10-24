@@ -81,4 +81,15 @@ const technicianChangedToCustomer = (booking) => {
     : `Hello, your technician could not make it for booking #${booking.orderNumber}. We are finding you another one and will let you know as soon as they accept.`);
 };
 
-module.exports = { offerToTechnician, lateToTechnician, assignedToCustomer, technicianChangedToCustomer };
+// The applicant: the admin approved or rejected the technician application (plain text — it only lands if they messaged
+// us in the last 24 hours, otherwise the app login message explains the result).
+const applicationDecision = (application, approved) => send(
+  application.phone, '', [],
+  approved
+    ? `Hello ${application.fullName}, your Ahmed Cooling technician application was approved. Log in to the technician app with your phone number and password.
+مرحباً ${application.fullName}، تمت الموافقة على طلبك. سجّل الدخول في تطبيق الفنيين برقم جوالك وكلمة المرور.`
+    : `Hello ${application.fullName}, your Ahmed Cooling technician application was not approved: ${application.rejectionReason}
+مرحباً ${application.fullName}، لم تتم الموافقة على طلبك: ${application.rejectionReason}`
+);
+
+module.exports = { offerToTechnician, lateToTechnician, assignedToCustomer, technicianChangedToCustomer, applicationDecision };

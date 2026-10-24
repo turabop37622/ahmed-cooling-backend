@@ -533,6 +533,7 @@ router.delete('/bookings/:id', async (req, res) => {
 // ============================================
 router.use(require('./adminTechnicians'));
 router.use(require('./adminDispatch'));
+router.use(require('./adminApplications'));
 
 // ============================================
 // USERS
