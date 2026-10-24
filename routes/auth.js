@@ -341,8 +341,8 @@ router.post('/phone/login', async (req, res) => {
         // eslint-disable-next-line no-await-in-loop
         if (await require('bcryptjs').compare(password, application.passwordHash)) {
           return res.status(403).json(application.status === 'pending'
-            ? { success: false, applicationStatus: 'pending', message: 'Your technician application is under review. We will activate your account once it is approved.' }
-            : { success: false, applicationStatus: 'rejected', message: `Your technician application was not approved: ${application.rejectionReason || 'please contact us'}` });
+            ? { success: false, applicationStatus: 'pending', message: 'Your technician application is under review. Verification takes up to 2 working days; your account is activated once it is approved.', messageAr: 'طلب انضمامك كفني قيد المراجعة. يستغرق التحقق حتى يومي عمل، وسيتم تفعيل حسابك فور الموافقة.' }
+            : { success: false, applicationStatus: 'rejected', message: `Your technician application was not approved: ${application.rejectionReason || 'please contact us'}`, messageAr: `لم تتم الموافقة على طلبك كفني: ${application.rejectionReason || 'يرجى التواصل معنا'}` });
         }
       }
       return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
