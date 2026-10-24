@@ -24,7 +24,11 @@ const technicianApplicationSchema = new mongoose.Schema({
   photoUrl: { type: String, required: true },
   // The applicant's device (FCM / Expo token) so the approval or rejection reaches the phone before they have an account.
   pushTokens: [{ token: String, kind: { type: String, enum: ['fcm', 'expo'] }, platform: String, _id: false }],
-  status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending', index: true },
+  // changes_requested = the admin sent it back with a message; the applicant fixes it and it becomes pending again.
+  status: { type: String, enum: ['pending', 'changes_requested', 'approved', 'rejected'], default: 'pending', index: true },
+  adminMessage: { type: String, trim: true, maxlength: 500, default: '' },
+  changesRequestedAt: { type: Date },
+  resubmittedAt: { type: Date },
   rejectionReason: { type: String, trim: true, maxlength: 500, default: '' },
   reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   reviewedAt: { type: Date },

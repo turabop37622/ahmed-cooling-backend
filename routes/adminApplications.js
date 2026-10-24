@@ -14,33 +14,42 @@ const { notifyUser, pushToTokens } = require('../utils/notify');
 
 const isObjectId = (v) => typeof v === 'string' && /^[a-f\d]{24}$/i.test(v);
 const serverError = (res) => res.status(500).json({ success: false, message: 'Server error' });
-const STATUSES = ['pending', 'approved', 'rejected'];
+const STATUSES = ['pending', 'changes_requested', 'approved', 'rejected'];
 
 // A signed link to the private ID photo (only the admin panel ever gets one).
 const idPhotoUrl = (publicId) => cloudinary.url(publicId, { type: 'authenticated', sign_url: true, secure: true, resource_type: 'image', format: 'jpg' });
 
 // Tells the applicant the decision: push to the device they applied from, an in-app notification (waiting for them in
 // the technician app after their first login, when approved) and a WhatsApp message.
-const tellApplicant = async (application, approved, userId) => {
-  const title = approved ? 'Application approved' : 'Application not approved';
-  const titleAr = approved ? 'تمت الموافقة على طلبك' : 'لم تتم الموافقة على طلبك';
-  const message = approved
-    ? 'Welcome to Ahmed Cooling! Log in to the technician app with your mobile number and password.'
-    : `Your technician application was not approved: ${application.rejectionReason}`;
-  const messageAr = approved
-    ? 'مرحباً بك في أحمد للتبريد! سجّل الدخول إلى تطبيق الفنيين برقم جوالك وكلمة المرور.'
-    : `لم تتم الموافقة على طلبك: ${application.rejectionReason}`;
-  const data = { kind: 'application', status: approved ? 'approved' : 'rejected', titleAr, messageAr };
+const tellApplicant = async (application, decision, userId) => {
+  const approved = decision === 'approved';
+  const TEXT = {
+    approved: [
+      'Application approved', 'تمت الموافقة على طلبك',
+      'Welcome to Ahmed Cooling! Log in to the technician app with your mobile number and password.', 'مرحباً بك في أحمد للتبريد! سجّل الدخول إلى تطبيق الفنيين برقم جوالك وكلمة المرور.',
+    ],
+    rejected: [
+      'Application not approved', 'لم تتم الموافقة على طلبك',
+      `Your technician application was not approved: ${application.rejectionReason}`, `لم تتم الموافقة على طلبك: ${application.rejectionReason}`,
+    ],
+    changes: [
+      'Please update your application', 'يرجى تحديث طلبك',
+      `We need a change: ${application.adminMessage} Open the technician app, tap Login and update your application.`, `نحتاج إلى تعديل: ${application.adminMessage} افتح تطبيق الفنيين واضغط تسجيل الدخول ثم عدّل طلبك.`,
+    ],
+  };
+  const [title, titleAr, message, messageAr] = TEXT[decision];
+  const data = { kind: 'application', status: decision, titleAr, messageAr };
   await Promise.all([
     pushToTokens(application.pushTokens, { title: `${title} | ${titleAr}`, message: `${message}\n${messageAr}`, data }),
     approved && userId ? notifyUser(userId, { type: 'system', title, titleAr, message, messageAr, data, priority: 'high' }) : null,
-    dispatchWhatsApp.applicationDecision(application, approved),
+    dispatchWhatsApp.applicationDecision(application, decision),
   ].filter(Boolean).map((p) => Promise.resolve(p).catch(() => {})));
 };
+
 const shape = (a, { withId = false } = {}) => ({
   _id: a._id, fullName: a.fullName, phone: a.phone, email: a.email || '', cities: a.cities, skills: a.skills,
   experienceYears: a.experienceYears, about: a.about, nationalId: a.nationalId, dateOfBirth: a.dateOfBirth, photoUrl: a.photoUrl,
-  status: a.status, rejectionReason: a.rejectionReason || '', reviewedAt: a.reviewedAt || null, user: a.user || null, createdAt: a.createdAt,
+  status: a.status, rejectionReason: a.rejectionReason || '', adminMessage: a.adminMessage || '', resubmittedAt: a.resubmittedAt || null, reviewedAt: a.reviewedAt || null, user: a.user || null, createdAt: a.createdAt,
   ...(withId ? { idPhotoUrl: idPhotoUrl(a.idPhotoPublicId), idPhotoBackUrl: a.idPhotoBackPublicId ? idPhotoUrl(a.idPhotoBackPublicId) : '',
     passportUrl: a.passportPublicId ? idPhotoUrl(a.passportPublicId) : '', certificateUrl: a.certificatePublicId ? idPhotoUrl(a.certificatePublicId) : '' } : {}),
 });
@@ -111,11 +120,33 @@ router.post('/technician-applications/:id/approve', async (req, res) => {
     a.reviewedAt = new Date();
     await a.save();
     await AuditLog.record({ actor: req.user.id, action: 'technician.application_approve', target: { kind: 'technician', id: String(user._id), label: a.fullName } });
-    tellApplicant(a, true, user._id).catch(() => {});
+    tellApplicant(a, 'approved', user._id).catch(() => {});
     res.json({ success: true, message: 'Approved — the technician can now log in', userId: String(user._id) });
   } catch (err) {
     if (err && err.code === 11000) return res.status(409).json({ success: false, message: 'An account with this phone number or email already exists' });
     console.error('Admin application approve error:', err.message);
+    serverError(res);
+  }
+});
+
+// The documents or details are not right: send the application back with a message. The applicant is told on the phone
+// and on WhatsApp, and fixes it from the app (login screen), after which it is pending again.
+router.post('/technician-applications/:id/request-changes', async (req, res) => {
+  try {
+    if (!isObjectId(req.params.id)) return res.status(404).json({ success: false, message: 'Application not found' });
+    const message = String((req.body && req.body.message) || '').trim().slice(0, 500);
+    if (message.length < 3) return res.status(400).json({ success: false, message: 'Write what the applicant needs to fix' });
+    const a = await TechnicianApplication.findOneAndUpdate(
+      { _id: req.params.id, status: 'pending' },
+      { $set: { status: 'changes_requested', adminMessage: message, changesRequestedAt: new Date(), reviewedBy: req.user.id, reviewedAt: new Date() } },
+      { new: true }
+    );
+    if (!a) return res.status(409).json({ success: false, message: 'Only an application that is waiting for review can be sent back' });
+    await AuditLog.record({ actor: req.user.id, action: 'technician.application_request_changes', target: { kind: 'technician', id: String(a._id), label: a.fullName }, after: { message } });
+    tellApplicant(a, 'changes').catch(() => {});
+    res.json({ success: true, message: 'Sent back to the applicant' });
+  } catch (err) {
+    console.error('Admin application request-changes error:', err.message);
     serverError(res);
   }
 });
@@ -126,7 +157,7 @@ router.post('/technician-applications/:id/reject', async (req, res) => {
     const reason = String((req.body && req.body.reason) || '').trim().slice(0, 500);
     if (reason.length < 3) return res.status(400).json({ success: false, message: 'Write the reason so the applicant knows why' });
     const a = await TechnicianApplication.findOneAndUpdate(
-      { _id: req.params.id, status: 'pending' },
+      { _id: req.params.id, status: { $in: ['pending', 'changes_requested'] } },
       { $set: { status: 'rejected', rejectionReason: reason, reviewedBy: req.user.id, reviewedAt: new Date() } },
       { new: true }
     );
@@ -136,7 +167,7 @@ router.post('/technician-applications/:id/reject', async (req, res) => {
       try { await cloudinary.uploader.destroy(publicId, { type: 'authenticated', invalidate: true }); } catch (e) { console.warn('ID photo cleanup failed:', e.message); }
     }
     await AuditLog.record({ actor: req.user.id, action: 'technician.application_reject', target: { kind: 'technician', id: String(a._id), label: a.fullName }, after: { reason } });
-    tellApplicant(a, false).catch(() => {});
+    tellApplicant(a, 'rejected').catch(() => {});
     res.json({ success: true, message: 'Application rejected' });
   } catch (err) {
     console.error('Admin application reject error:', err.message);

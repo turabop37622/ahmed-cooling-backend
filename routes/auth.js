@@ -315,6 +315,29 @@ router.post('/phone/register', async (req, res) => {
 // ================================
 // PHONE: LOGIN
 // ================================
+// What a technician who applied from the app sees when they try to log in before they are approved.
+const applicationLoginReply = (application) => {
+  if (application.status === 'changes_requested') {
+    return {
+      success: false, applicationStatus: 'changes_requested', adminMessage: application.adminMessage,
+      message: `Your application needs a change: ${application.adminMessage}`,
+      messageAr: `طلبك يحتاج إلى تعديل: ${application.adminMessage}`,
+    };
+  }
+  if (application.status === 'pending') {
+    return {
+      success: false, applicationStatus: 'pending',
+      message: 'Your technician application is under review. Verification takes up to 2 working days; your account is activated once it is approved.',
+      messageAr: 'طلب انضمامك كفني قيد المراجعة. يستغرق التحقق حتى يومي عمل، وسيتم تفعيل حسابك فور الموافقة.',
+    };
+  }
+  return {
+    success: false, applicationStatus: 'rejected',
+    message: `Your technician application was not approved: ${application.rejectionReason || 'please contact us'}`,
+    messageAr: `لم تتم الموافقة على طلبك كفني: ${application.rejectionReason || 'يرجى التواصل معنا'}`,
+  };
+};
+
 router.post('/phone/login', async (req, res) => {
   try {
     const { phone, password } = req.body;
@@ -338,14 +361,12 @@ router.post('/phone/login', async (req, res) => {
       try {
         if (require('mongoose').connection.readyState !== 1) throw new Error('database not connected');
         const TechnicianApplication = require('../models/TechnicianApplication');
-        const applications = await TechnicianApplication.find({ phone: { $in: phoneVariants(phone) }, status: { $in: ['pending', 'rejected'] } })
-          .select('+passwordHash status rejectionReason').sort({ createdAt: -1 }).limit(3);
+        const applications = await TechnicianApplication.find({ phone: { $in: phoneVariants(phone) }, status: { $in: ['pending', 'changes_requested', 'rejected'] } })
+          .select('+passwordHash status rejectionReason adminMessage').sort({ createdAt: -1 }).limit(3);
         for (const application of applications) {
           // eslint-disable-next-line no-await-in-loop
           if (await require('bcryptjs').compare(password, application.passwordHash)) {
-            return res.status(403).json(application.status === 'pending'
-              ? { success: false, applicationStatus: 'pending', message: 'Your technician application is under review. Verification takes up to 2 working days; your account is activated once it is approved.', messageAr: 'طلب انضمامك كفني قيد المراجعة. يستغرق التحقق حتى يومي عمل، وسيتم تفعيل حسابك فور الموافقة.' }
-              : { success: false, applicationStatus: 'rejected', message: `Your technician application was not approved: ${application.rejectionReason || 'please contact us'}`, messageAr: `لم تتم الموافقة على طلبك كفني: ${application.rejectionReason || 'يرجى التواصل معنا'}` });
+            return res.status(403).json(applicationLoginReply(application));
           }
         }
       } catch (lookupError) {

@@ -267,14 +267,26 @@ test.beforeEach(() => {
   audits = []; findCalls = []; created = {}; settlements = [];
 });
 
-test('technician accounts cannot be created from the admin panel any more (they apply from the app)', async () => {
+test('admin creates a technician: verified phone account + profile; duplicates are 409; bad input 400', async () => {
   const body = { fullName: 'New Tech', phone: '0561112222', password: 'password123', cities: ['makkah'], specialties: [], autoAssign: true };
   const res = await call('POST', '/admin/technicians', ADMIN, body);
-  assert.equal(res.status, 403);
-  assert.match(res.json.message, /from the app/);
-  assert.ok(res.json.messageAr);
-  assert.equal(created.user, undefined, 'no account was created');
-  assert.equal((await call('POST', '/admin/technicians', TECH, body)).status, 403, 'still admin only');
+  assert.equal(res.status, 201);
+  assert.equal(res.json.technician.phone, '+966561112222');
+  assert.deepEqual(res.json.technician.cities, ['makkah']);
+  assert.equal(res.json.technician.autoAssign, true);
+  assert.equal(res.json.technician.active, true);
+  assert.equal(res.json.technician.stats.commissionDue, 0);
+  assert.equal(created.user.role, 'technician');
+  assert.equal(created.user.authProvider, 'phone');
+  assert.equal(created.user.isVerified, true);
+  assert.equal(created.user.isPhoneVerified, true);
+  assert.equal(created.profile.autoAssign, true);
+  assert.ok(!JSON.stringify(audits).includes('password123'), 'the password never reaches the audit log');
+
+  assert.equal((await call('POST', '/admin/technicians', ADMIN, { ...body, phone: '+966 56 111 2222' })).status, 409, 'same phone, other spelling');
+  assert.equal((await call('POST', '/admin/technicians', ADMIN, { ...body, password: 'short' })).status, 400);
+  assert.equal((await call('POST', '/admin/technicians', ADMIN, { ...body, cities: ['dammam'] })).status, 400);
+  assert.equal((await call('POST', '/admin/technicians', TECH, body)).status, 403, 'admin only');
 });
 
 test('admin edits a technician: toggles, 404 for non-technicians, 409 for a taken phone', async () => {
