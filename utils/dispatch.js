@@ -247,7 +247,7 @@ const acceptOffer = async (bookingId, technicianId) => {
   }
   await wallet.createHold(updated, technicianId);
 
-  const tech = await User.findById(technicianId).select('fullName phone').lean();
+  const tech = await User.findById(technicianId).select('fullName phone profileImage').lean();
   if (updated.user) {
     const num = updated.orderNumber || updated.bookingId;
     notifyUser(updated.user, {
@@ -255,7 +255,7 @@ const acceptOffer = async (bookingId, technicianId) => {
       title: 'Technician assigned', titleAr: 'تم تعيين فني',
       message: `${tech?.fullName || 'Your technician'} will take your booking #${num} and contact you shortly${tech?.phone ? ' on ' + tech.phone : ''}.`,
       messageAr: `${tech?.fullName || 'الفني'} سيتولى حجزك رقم ${num} وسيتواصل معك قريباً.`,
-      data: { bookingId: String(updated._id), publicBookingId: updated.bookingId, orderNumber: updated.orderNumber, status: 'assigned', event: 'assigned' },
+      data: { bookingId: String(updated._id), publicBookingId: updated.bookingId, orderNumber: updated.orderNumber, status: 'assigned', event: 'assigned', technicianName: tech?.fullName, technicianPhoto: tech?.profileImage || undefined },
     }).catch(() => {});
   }
   if (tech) dispatchWhatsApp.assignedToCustomer(updated, tech).catch(() => {});

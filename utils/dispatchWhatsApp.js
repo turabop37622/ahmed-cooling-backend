@@ -2,6 +2,7 @@
 // ..." to the customer. These are business-initiated, so Meta needs an approved template outside the 24h window:
 //   WHATSAPP_TECH_OFFER_TEMPLATE        body: 3 variables  {{1}} service  {{2}} when  {{3}} area
 //   WHATSAPP_CUSTOMER_ASSIGNED_TEMPLATE body: 4 variables  {{1}} customer {{2}} order number {{3}} technician {{4}} technician phone
+//     (+ optional image header with the technician's photo: WHATSAPP_CUSTOMER_ASSIGNED_IMAGE=1)
 // Both use WHATSAPP_DISPATCH_TEMPLATE_LANG (default en_US). While a template name is not configured, a plain text message
 // is tried instead (Meta delivers it only if the person messaged this number in the last 24 hours). A send never throws:
 // the app push notification (utils/notify.js) is the main channel, WhatsApp is the extra one.
@@ -12,6 +13,9 @@ const { normalizePhone } = require('./phone');
 const LANG = process.env.WHATSAPP_DISPATCH_TEMPLATE_LANG || 'en_US';
 const TECH_OFFER_TEMPLATE = process.env.WHATSAPP_TECH_OFFER_TEMPLATE || '';
 const CUSTOMER_ASSIGNED_TEMPLATE = process.env.WHATSAPP_CUSTOMER_ASSIGNED_TEMPLATE || '';
+// Set to 1 when that template has an IMAGE header: the technician's photo (or the logo when there is none) goes in it.
+const CUSTOMER_ASSIGNED_IMAGE = /^(1|true|yes)$/i.test(process.env.WHATSAPP_CUSTOMER_ASSIGNED_IMAGE || '');
+const DEFAULT_PHOTO = process.env.WHATSAPP_DEFAULT_TECH_IMAGE || 'https://www.ahmedcoolingworkshop.com/logo-square.png';
 
 const serviceName = (booking) => {
   const svc = booking.service && typeof booking.service === 'object' ? booking.service : {};
@@ -20,14 +24,16 @@ const serviceName = (booking) => {
 const whenText = (booking) => (booking.date ? [booking.date, booking.time].filter(Boolean).join(' ') : 'Flexible');
 const areaText = (booking) => String(booking.city || String(booking.address || '').split(',')[0] || '').trim().slice(0, 40) || '-';
 
-const send = async (phone, templateName, params, fallbackText) => {
+const send = async (phone, templateName, params, fallbackText, { headerImage } = {}) => {
   try {
     if (!whatsappCloud.isConfigured() || !phone) return false;
     const to = normalizePhone(phone);
     if (templateName) {
-      await whatsappCloud.sendTemplateMessage(to, templateName, LANG, [
+      const components = [
         { type: 'body', parameters: params.map((text) => ({ type: 'text', text: String(text || '-').slice(0, 200) })) },
-      ]);
+      ];
+      if (headerImage) components.unshift({ type: 'header', parameters: [{ type: 'image', image: { link: headerImage } }] });
+      await whatsappCloud.sendTemplateMessage(to, templateName, LANG, components);
       await logMessage(to, 'out', `[Template: ${templateName}] ${fallbackText}`, { messageType: 'template', sentBy: 'bot' });
     } else {
       await whatsappCloud.sendTextMessage(to, fallbackText);
@@ -62,7 +68,9 @@ const assignedToCustomer = (booking, technician) => {
   const text = isAr
     ? `مرحباً ${name}، تم قبول حجزك رقم ${booking.orderNumber} من الفني ${technician.fullName}${technician.phone ? ` (${technician.phone})` : ''}. سيتواصل معك قريباً.`
     : `Hello ${name}, your booking #${booking.orderNumber} was taken by technician ${technician.fullName}${technician.phone ? ` (${technician.phone})` : ''}. They will contact you shortly.`;
-  return send(booking.phone, CUSTOMER_ASSIGNED_TEMPLATE, [name, booking.orderNumber, technician.fullName, technician.phone || '-'], text);
+  const photo = /^https:\/\//.test(technician.profileImage || '') ? technician.profileImage : DEFAULT_PHOTO;
+  return send(booking.phone, CUSTOMER_ASSIGNED_TEMPLATE, [name, booking.orderNumber, technician.fullName, technician.phone || '-'], text,
+    { headerImage: CUSTOMER_ASSIGNED_IMAGE ? photo : undefined });
 };
 
 // Customer: the technician gave it back, we are finding another.

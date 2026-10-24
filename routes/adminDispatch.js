@@ -11,6 +11,8 @@ const AuditLog = require('../models/AuditLog');
 const wallet = require('../utils/wallet');
 const dispatch = require('../utils/dispatch');
 const { round2 } = require('../utils/commission');
+const cloudinary = require('../utils/cloudinary');
+const upload = require('../utils/multer');
 
 const isObjectId = (v) => typeof v === 'string' && /^[a-f\d]{24}$/i.test(v);
 const serverError = (res) => res.status(500).json({ success: false, message: 'Server error' });
@@ -30,14 +32,16 @@ router.get('/wallets', async (req, res) => {
   try {
     const users = await User.find({ role: 'technician' }).select('fullName phone').sort({ fullName: 1 }).lean();
     const ids = users.map((u) => u._id);
-    const [profiles, balances, pending] = await Promise.all([
+    const [profiles, balances, pending, photos] = await Promise.all([
       Technician.find({ user: { $in: ids } }).select('user frozenUntil frozenReason lateCount active').lean(),
       wallet.balances(ids),
       TechnicianCancellation.aggregate([
         { $match: { technician: { $in: ids }, reviewStatus: { $in: ['pending', 'deferred'] } } },
         { $group: { _id: '$technician', held: { $sum: '$holdAmount' }, count: { $sum: 1 } } },
       ]),
+      User.find({ _id: { $in: ids } }).select('profileImage').lean(),
     ]);
+    const photoOf = new Map(photos.map((u) => [String(u._id), u.profileImage || '']));
     const profileOf = new Map(profiles.map((p) => [String(p.user), p]));
     const pendingOf = new Map(pending.map((p) => [String(p._id), p]));
     const now = new Date();
@@ -47,7 +51,7 @@ router.get('/wallets', async (req, res) => {
         const p = profileOf.get(String(u._id)) || {};
         const hold = pendingOf.get(String(u._id));
         return {
-          technicianId: String(u._id), name: u.fullName, phone: u.phone || null,
+          technicianId: String(u._id), name: u.fullName, phone: u.phone || null, photo: photoOf.get(String(u._id)) || '',
           balance: balances.get(String(u._id)) || 0,
           underReview: hold ? round2(hold.held) : 0, reviewCount: hold ? hold.count : 0,
           frozenUntil: p.frozenUntil && new Date(p.frozenUntil) > now ? p.frozenUntil : null,
@@ -118,6 +122,45 @@ router.post('/wallets/:id/adjust', async (req, res) => {
     res.status(201).json({ success: true, message: 'Wallet corrected', transaction: tx, balance });
   } catch (err) {
     serverError(res);
+  }
+});
+
+// ---------- photo (sent to customers in the "technician assigned" WhatsApp message) ----------
+
+// multipart field "image" (jpeg/png/webp, max 5 MB). Cropped square around the face and stored as JPEG, which is what
+// a WhatsApp template image header accepts. The same public_id is reused, so a new photo replaces the old one.
+router.post('/technicians/:id/photo', upload.single('image'), async (req, res) => {
+  try {
+    const user = await loadTechnician(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'Technician not found' });
+    if (!req.file) return badRequest(res, 'Choose a photo (JPG, PNG or WebP, up to 5 MB)');
+    const result = await new Promise((resolve, reject) => {
+      cloudinary.uploader.upload_stream(
+        {
+          folder: 'ahmedcooling/technicians', public_id: String(user._id), overwrite: true, invalidate: true, format: 'jpg',
+          transformation: [{ width: 640, height: 640, crop: 'fill', gravity: 'face' }],
+        },
+        (error, out) => (error ? reject(error) : resolve(out))
+      ).end(req.file.buffer);
+    });
+    await User.updateOne({ _id: user._id }, { $set: { profileImage: result.secure_url } });
+    await AuditLog.record({ actor: req.user.id, action: 'technician.photo', target: { kind: 'technician', id: String(user._id), label: user.fullName } });
+    res.json({ success: true, message: 'Photo saved', photo: result.secure_url });
+  } catch (err) {
+    console.error('Admin technician photo error:', err.message);
+    res.status(500).json({ success: false, message: 'Could not save the photo' });
+  }
+});
+
+router.delete('/technicians/:id/photo', async (req, res) => {
+  try {
+    const user = await loadTechnician(req.params.id);
+    if (!user) return res.status(404).json({ success: false, message: 'Technician not found' });
+    await User.updateOne({ _id: user._id }, { $set: { profileImage: '' } });
+    try { await cloudinary.uploader.destroy(`ahmedcooling/technicians/${user._id}`); } catch (e) { console.warn('Technician photo cleanup failed:', e.message); }
+    res.json({ success: true, message: 'Photo removed' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
