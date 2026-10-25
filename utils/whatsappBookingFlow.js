@@ -195,6 +195,26 @@ const PART_OF_DAY = [
 ];
 const partOfDay = (text) => (PART_OF_DAY.find(([re]) => re.test(text)) || [])[1] || null;
 
+// Could this message be an answer to the question that is open (service / date / time / confirm)? A tap, "back", "cancel",
+// "change the date", a number, a date or time word all are. "hello" or a sentence about something else is not: the caller
+// then talks to the customer instead of repeating "that date doesn't work". The address step takes any text.
+const DATE_WORDS = /\b(today|tomorrow|aaj|kal|parso|parson)\b|اليوم|غدا|غداً|بكرة|بكره|بعد\s*غد/i;
+const TIME_WORDS = /any\s*time|\b(morning|noon|afternoon|evening|night|subah|dopahar|shaam|raat)\b|اي\s*وقت|أي\s*وقت|صباح|ظهر|عصر|مساء|ليل/i;
+const YES_NO_WORDS = /\b(yes|yeah|yep|ok|okay|confirm|no|nope|cancel|change|edit|redo|restart|haan|han|nahi|nahin)\b|نعم|أكيد|اكيد|تأكيد|موافق|لا\b|إلغاء|الغاء|تغيير|تعديل|غير/i;
+const looksLikeAnswer = (step, rawInput) => {
+  const input = asciiDigits(String(rawInput || '')).trim();
+  if (!input) return false;
+  if (/^(svc_|date_|time_|confirm_|nav_)/.test(input)) return true;
+  if (BACK_RE.test(input) || CANCEL_RE.test(input) || CHANGE_RE.some(([, re]) => re.test(input))) return true;
+  switch (step) {
+    case 'service': return /^\d+$/.test(input) || faq.findServices(faq.normalize(input)).length > 0;
+    case 'date': return /\d/.test(input) || DATE_WORDS.test(input);
+    case 'time': return /\d/.test(input) || TIME_WORDS.test(input);
+    case 'confirm': return YES_NO_WORDS.test(input);
+    default: return true;
+  }
+};
+
 // Starts the flow if the message looks like a booking request and none is already in progress. Returns true if
 // it handled the message (started the flow, or is mid-flow and advanced/re-asked a step), false if this message
 // is unrelated and should go to the general FAQ bot instead.
@@ -501,4 +521,4 @@ const handleLocation = async (phone, location, conversation) => {
 const DRAFT_TTL_MS = 3 * 60 * 60 * 1000;
 const isDraftStale = (draft) => !draft?.updatedAt || Date.now() - new Date(draft.updatedAt).getTime() > DRAFT_TTL_MS;
 
-module.exports = { handleMessage, startFlow, clearDraft, resume, handleLocation, isDraftStale };
+module.exports = { handleMessage, startFlow, clearDraft, resume, handleLocation, isDraftStale, looksLikeAnswer };

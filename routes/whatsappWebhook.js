@@ -158,6 +158,20 @@ const handleInterruption = async (phone, text, conversation) => {
     return menu.handle(phone, text, conversation);
   }
 
+  // "hello" in the middle of a booking: a new conversation, so start over (the language buttons come first).
+  const openStep = conversation.bookingDraft && conversation.bookingDraft.step;
+  if (openStep && faq.isGreeting(norm)) {
+    await bookingFlow.clearDraft(phone);
+    return menu.handle(phone, text, { ...conversation, bookingDraft: undefined });
+  }
+  // Anything that is not an answer to the question that is open and is more than one word is a conversation: the AI
+  // answers, then the booking question is asked again. (One odd word just gets the question repeated.)
+  if (openStep && !bookingFlow.looksLikeAnswer(openStep, text) && (tokens.length >= 2 || /[?؟]/.test(text))) {
+    await chatbot.handleIncomingText(phone, text, { ...conversation, bookingDraft: undefined });
+    await bookingFlow.resume(phone, isAr);
+    return true;
+  }
+
   // They only opened the service list and now want to talk about their problem: nothing is committed yet, so leave the
   // booking and let the AI chat (it ends with a "Book a service" button). A service name or a number is still an answer.
   const step = conversation.bookingDraft && conversation.bookingDraft.step;
