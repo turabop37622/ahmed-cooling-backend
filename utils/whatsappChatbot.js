@@ -181,6 +181,18 @@ const sendTroubleReply = async (phone, isAr) => {
 
 // Fallback for anything the menu and the instant FAQ answers (utils/whatsappMenu.js) didn't handle: ask the AI.
 // `conversation` is the WhatsAppConversation doc, already up to date with this inbound message.
+// One number cannot make the AI run without limit (cost, and a loop of messages): at most AI_PER_HOUR answers an hour.
+const AI_PER_HOUR = Number(process.env.WHATSAPP_AI_PER_HOUR) > 0 ? Number(process.env.WHATSAPP_AI_PER_HOUR) : 20;
+const aiCalls = new Map(); // phone -> timestamps of the last hour
+const aiAllowed = (phone, now = Date.now()) => {
+  const recent = (aiCalls.get(phone) || []).filter((t) => now - t < 3600000);
+  if (recent.length >= AI_PER_HOUR) { aiCalls.set(phone, recent); return false; }
+  recent.push(now);
+  aiCalls.set(phone, recent);
+  if (aiCalls.size > 5000) for (const [key, times] of aiCalls) if (!times.some((t) => now - t < 3600000)) aiCalls.delete(key);
+  return true;
+};
+
 const handleIncomingText = async (phone, text, conversation) => {
   if (conversation && conversation.status !== 'bot') return; // an admin owns this conversation now — stay quiet
   const language = conversation?.language;
@@ -188,6 +200,18 @@ const handleIncomingText = async (phone, text, conversation) => {
 
   if (isHandoffRequest(text)) {
     await requestHuman(phone, text, conversation, language);
+    return;
+  }
+
+  if (!aiAllowed(phone)) {
+    const body = isAr
+      ? 'وصلتنا رسائل كثيرة منك خلال وقت قصير. للمتابعة اختر من القائمة أو تحدث مع فريقنا.'
+      : 'We have received many messages from you in a short time. Please use the menu, or talk to our team.';
+    await sendButtonsMessage(phone, body, [
+      { id: 'menu_main', title: isAr ? 'القائمة الرئيسية' : 'Main menu' },
+      { id: 'menu_human', title: isAr ? 'تحدث مع فريقنا' : 'Talk to our team' },
+    ]).catch(() => {});
+    await logMessage(phone, 'out', body, { messageType: 'text', sentBy: 'bot' });
     return;
   }
 

@@ -37,12 +37,20 @@ router.get('/conversations', auth, adminOnly, async (req, res) => {
   }
 });
 
+// Meta only lets us send free text within 24h of the customer's last message to us.
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+const windowFor = async (phone) => {
+  const last = await WhatsAppMessage.findOne({ phone, direction: 'in' }).sort({ createdAt: -1 }).select('createdAt');
+  const closesAt = last ? new Date(new Date(last.createdAt).getTime() + WINDOW_MS) : null;
+  return { windowOpen: !!closesAt && closesAt.getTime() > Date.now(), windowClosesAt: closesAt };
+};
+
 // Message history for one phone number (oldest first, like a chat thread).
 router.get('/conversations/:phone/messages', auth, adminOnly, async (req, res) => {
   try {
     const phone = decodeURIComponent(req.params.phone);
     const messages = await WhatsAppMessage.find({ phone }).sort({ createdAt: 1 }).limit(500);
-    res.json({ success: true, messages });
+    res.json({ success: true, messages, ...(await windowFor(phone)) });
   } catch (err) {
     console.error('❌ Admin WhatsApp messages error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -76,12 +84,19 @@ router.post('/conversations/:phone/reply', auth, adminOnly, async (req, res) => 
     const message = String(req.body.message || '').trim().slice(0, 4096);
     if (!message) return res.status(400).json({ success: false, message: 'Message is required' });
 
+    const win = await windowFor(phone);
+    if (!win.windowOpen) {
+      return res.status(409).json({ success: false, windowOpen: false, message: 'The 24-hour reply window has closed: the customer has not written in the last 24 hours, so WhatsApp only allows an approved template message. Ask them to message us again, or call them.' });
+    }
     await whatsappCloud.sendTextMessage(phone, message);
     await logMessage(phone, 'out', message, { messageType: 'text', sentBy: 'admin', adminUser: req.user.id });
     const conversation = await setStatus(phone, 'human');
     res.json({ success: true, conversation });
   } catch (err) {
     console.error('❌ Admin WhatsApp reply error:', err.response?.data || err.message);
+    if (err.response?.data?.error?.code === 131047) {
+      return res.status(409).json({ success: false, windowOpen: false, message: 'The 24-hour reply window has closed: WhatsApp only allows an approved template message now. Ask the customer to message us again, or call them.' });
+    }
     res.status(500).json({ success: false, message: err.response?.data?.error?.message || 'Failed to send message' });
   }
 });
