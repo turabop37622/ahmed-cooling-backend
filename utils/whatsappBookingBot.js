@@ -35,6 +35,9 @@ const CANCEL_PAYLOAD = process.env.WHATSAPP_CANCEL_PAYLOAD || 'BOOKING_CANCEL';
 const configuredDelay = process.env.WHATSAPP_BOOKING_CONFIRM_DELAY_SEC;
 const DELAY_SEC = configuredDelay && Number(configuredDelay) >= 0 ? Number(configuredDelay) : 5;
 const TICK_MS = 5 * 1000;
+const minutesEnv = (name, fallback) => (Number(process.env[name]) > 0 ? Number(process.env[name]) : fallback);
+const REMINDER_MIN = minutesEnv('WHATSAPP_BOOKING_REMINDER_MIN', 60);
+const UNCONFIRMED_ALERT_MIN = minutesEnv('WHATSAPP_BOOKING_UNCONFIRMED_ALERT_MIN', 180);
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 const SENDER_EMAIL = process.env.EMAIL_FROM || ADMIN_EMAIL;
@@ -127,7 +130,7 @@ const claimForConfirmationSend = (bookingId) => Booking.findOneAndUpdate(
   { new: true }
 );
 
-const sendConfirmationRequest = async (booking) => {
+const sendConfirmationRequest = async (booking, { reminder = false } = {}) => {
   if (!canonicalSaudiMobile(booking.phone)) {
     // Can't reach this number on WhatsApp at all — the booking would otherwise sit silently pending forever.
     await notifyAdminIssue(booking, {
@@ -157,6 +160,7 @@ const sendConfirmationRequest = async (booking) => {
       messageType: 'template', sentBy: 'bot', customerName: booking.customerName,
     });
   } catch (err) {
+    if (reminder) { console.error('❌ WhatsApp reminder failed for booking', booking.bookingId || booking._id, err.message); return; }
     console.error('❌ WhatsApp confirmation request failed for booking', booking.bookingId || booking._id, err.message);
     await notifyAdminIssue(booking, {
       issue: 'WhatsApp confirmation message failed to send',
@@ -182,13 +186,59 @@ const tick = async () => {
   }
 };
 
+// Bookings nobody has answered: one more nudge after REMINDER_MIN, and the admin is told after UNCONFIRMED_ALERT_MIN so
+// the booking is not left pending in silence. Each is claimed atomically, like the first message.
+const unanswered = (extra) => ({
+  status: 'pending', deletedAt: null,
+  'whatsappBot.confirmationSentAt': { $exists: true },
+  'whatsappBot.customerReply': { $exists: false },
+  ...extra,
+});
+const chaseUnanswered = async () => {
+  const now = Date.now();
+  const toRemind = await Booking.find(unanswered({
+    'whatsappBot.reminderSentAt': { $exists: false },
+    'whatsappBot.confirmationSentAt': { $lte: new Date(now - REMINDER_MIN * 60000) },
+  })).limit(25);
+  for (const booking of toRemind) {
+    const claimed = await Booking.findOneAndUpdate(
+      { _id: booking._id, ...unanswered({ 'whatsappBot.reminderSentAt': { $exists: false } }) },
+      { $set: { 'whatsappBot.reminderSentAt': new Date() } }, { new: true }
+    );
+    if (claimed) await sendConfirmationRequest(claimed, { reminder: true });
+  }
+  const toAlert = await Booking.find(unanswered({
+    'whatsappBot.unconfirmedAlertedAt': { $exists: false },
+    'whatsappBot.confirmationSentAt': { $lte: new Date(now - UNCONFIRMED_ALERT_MIN * 60000) },
+  })).limit(25);
+  for (const booking of toAlert) {
+    const claimed = await Booking.findOneAndUpdate(
+      { _id: booking._id, ...unanswered({ 'whatsappBot.unconfirmedAlertedAt': { $exists: false } }) },
+      { $set: { 'whatsappBot.unconfirmedAlertedAt': new Date() } }, { new: true }
+    );
+    if (claimed) {
+      await notifyAdminIssue(claimed, {
+        issue: 'Customer has not confirmed the booking',
+        detail: `No answer to the WhatsApp confirmation after ${UNCONFIRMED_ALERT_MIN} minutes. Please call the customer to confirm or cancel.`,
+      });
+    }
+  }
+};
+
 let timer = null;
 const startScheduler = () => {
   if (timer || !whatsappCloud.isConfigured()) {
     if (!whatsappCloud.isConfigured()) console.log('ℹ️ WhatsApp Cloud API not configured — booking-confirmation bot scheduler not started.');
     return;
   }
-  timer = setInterval(() => { tick().catch((err) => console.error('❌ WhatsApp bot tick failed:', err.message)); }, TICK_MS);
+  let lastChase = 0;
+  timer = setInterval(() => {
+    tick().catch((err) => console.error('❌ WhatsApp bot tick failed:', err.message));
+    if (Date.now() - lastChase >= 60000) {
+      lastChase = Date.now();
+      chaseUnanswered().catch((err) => console.error('❌ WhatsApp reminder pass failed:', err.message));
+    }
+  }, TICK_MS);
   console.log(`✅ WhatsApp booking-confirmation bot started (sends about ${DELAY_SEC}s after a booking is created, checks every ${TICK_MS / 1000}s).`);
 };
 
