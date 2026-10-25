@@ -194,6 +194,14 @@ const handle = async (phone, input, conversation) => {
   const intent = faq.matchIntent(norm);
   const services = faq.findServices(norm);
 
+  // Roman Urdu: the tayyar answers below are English / Arabic, so apart from a booking lookup or starting a booking
+  // (which have their own buttons) the AI answers, in Roman Urdu.
+  if (faq.isRomanUrdu(input)) {
+    if (intent === 'status') { await bookingStatusReply(phone, lang); return true; }
+    if (await bookingFlow.handleMessage(phone, input, conversation)) return true;
+    return false;
+  }
+
   if (intent === 'status') { await bookingStatusReply(phone, lang); return true; }
   if (intent === 'prices' || intent === 'services_overview' || (intent === 'warranty' && services.length)) {
     await answer(phone, lang, services.length ? faq.serviceReply(services, lang) : faq.servicesOverview(lang));

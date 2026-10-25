@@ -45,6 +45,15 @@ const anyTokenIn = (tokens, set) => tokens.some((t) => set.has(t));
 // something that is wrong, so it is a conversation (the AI), not a service choice or a price card.
 const PROBLEM_RE = /\b(problem|issue|not\s*(working|cooling|starting|turning|running)|broken|stopped|noise|noisy|leak|leaking|fault|trouble|smell|burning|kharab|masla|mushkil|nahi|nahin|band|garam|shor|awaaz|tapak|pani)\b|(مشكل|عطل|خراب|تعطل|لا\s*يعمل|ما\s*يشتغل|لا\s*يبرد|ما\s*يبرد|تسريب|صوت|يسرب|مايبرد|ما\s*تبرد|لا\s*تبرد|ما\s*تشتغل)/i;
 
+// Urdu typed in Latin letters ("meri fridge cooling nahi kar rahi"): at least two common Urdu words and no Arabic script.
+// Our tayyar (canned) answers exist in English and Arabic only, so these messages go to the AI, which answers in Roman Urdu.
+const ROMAN_URDU_WORDS = /\b(meri|mera|mere|nahi|nahin|kar|karo|karna|karni|karein|rahi|raha|rahe|hai|hain|hy|kya|kaise|kab|kitna|kitne|kitni|aap|ap|ka|ki|ke|mein|main|se|ko|chahiye|chahie|kharab|thanda|masla|hogaya|gaya|gayi|bhai|shukriya|jaldi|abhi|pehle|baad|kitne|batao|bataye|bata|dijiye|dein|lagta|lagti)\b/g;
+const isRomanUrdu = (text) => {
+  const raw = String(text || '');
+  if (/[\u0600-\u06FF]/.test(raw)) return false;
+  return (raw.toLowerCase().match(ROMAN_URDU_WORDS) || []).length >= 2;
+};
+
 const isGreeting = (norm) => {
   const tokens = tokensOf(norm);
   return tokens.length <= 6 && anyTokenIn(tokens, GREETING) && allTokensIn(tokens, GREETING, FILLER);
@@ -237,6 +246,6 @@ const REPLIES = {
 };
 
 module.exports = {
-  normalize, tokensOf, PROBLEM_RE, isGreeting, isThanks, languageRequest, matchIntent, findServices,
+  normalize, tokensOf, PROBLEM_RE, isRomanUrdu, isGreeting, isThanks, languageRequest, matchIntent, findServices,
   servicesOverview, serviceReply, REPLIES, PRICE_NOTE, VISIT_FEE,
 };

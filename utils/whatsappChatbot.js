@@ -10,6 +10,7 @@ const { escapeHtml } = require('./security');
 const { sendTextMessage, sendButtonsMessage } = require('./whatsappCloud');
 const { logMessage, setStatus } = require('./whatsappConversationStore');
 const WhatsAppMessage = require('../models/WhatsAppMessage');
+const faq = require('./whatsappFaq');
 
 let catalogueServices = [];
 try { catalogueServices = require('../web/src/lib/services.json'); } catch { catalogueServices = []; }
@@ -91,8 +92,7 @@ const callGroq = async (phone, userText, language) => {
       ? '\nThe customer chose English in the menu, but answer in the language of their last message: if it is Roman Urdu / Hindi (Urdu written in Latin letters) reply in Roman Urdu, if it is Arabic reply in Arabic, otherwise reply in English.'
       : '';
   // Urdu typed in Latin letters is easy to mistake for English: spot it by its common words and say so explicitly.
-  const romanUrduWords = (userText.toLowerCase().match(/\b(meri|mera|mere|nahi|nahin|kar|karo|rahi|raha|rahe|hai|hain|kya|kaise|kab|aap|ap|ka|ki|ke|mein|main|se|ko|chahiye|karna|kharab|thanda|masla|hogaya|ho|gaya|bhai|shukriya)\b/g) || []).length;
-  const romanUrduHint = romanUrduWords >= 2 && !/[\u0600-\u06FF]/.test(userText)
+  const romanUrduHint = faq.isRomanUrdu(userText)
     ? '\nThe customer\'s last message is written in Roman Urdu: you MUST reply in Roman Urdu (Urdu in Latin letters, e.g. "Aap ka fridge kab se thanda nahi kar raha?"), not in English.'
     : '';
   const request = () => axios.post(

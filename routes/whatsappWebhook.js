@@ -168,6 +168,12 @@ const handleInterruption = async (phone, text, conversation) => {
     return true;
   }
 
+  if (faq.isRomanUrdu(text) && tokens.length >= 3 && step && step !== 'address') {
+    await chatbot.handleIncomingText(phone, text, { ...conversation, bookingDraft: undefined });
+    await bookingFlow.resume(phone, isAr);
+    return true;
+  }
+
   const hasQuestionMark = /[?؟]/.test(text);
   if ((hasQuestionMark || tokens.length <= 6) && faq.matchIntent(norm) && await menu.handle(phone, text, conversation)) {
     await bookingFlow.resume(phone, isAr);
