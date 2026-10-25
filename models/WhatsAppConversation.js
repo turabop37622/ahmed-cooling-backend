@@ -7,6 +7,8 @@ const whatsAppConversationSchema = new mongoose.Schema({
   phone: { type: String, required: true, unique: true },
   customerName: { type: String, default: '' },
   status: { type: String, enum: ['bot', 'needs_human', 'human'], default: 'bot' },
+  // When `status` last changed: a handoff nobody answers must not leave the customer talking to a silent bot forever.
+  statusChangedAt: { type: Date },
   lastMessagePreview: { type: String, default: '' },
   lastMessageAt: { type: Date, default: Date.now },
   lastDirection: { type: String, enum: ['in', 'out'] },

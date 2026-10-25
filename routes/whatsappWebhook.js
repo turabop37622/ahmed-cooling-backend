@@ -61,6 +61,10 @@ const interactiveId = (message) => str(interactiveReply(message)?.id) || null;
 // Meta re-sends a webhook it thinks we didn't acknowledge; without this a retry would be answered twice.
 const SEEN_TTL_MS = 10 * 60 * 1000;
 const seenMessages = new Map();
+
+// How long the bot waits for a person before answering again (see the status check in the handler below).
+const HANDOFF_WAIT_MIN = Number(process.env.WHATSAPP_HANDOFF_WAIT_MIN) || 30; // asked for the team, nobody replied
+const HUMAN_IDLE_MIN = Number(process.env.WHATSAPP_HUMAN_IDLE_MIN) || 360; // an admin replied, then went quiet
 const alreadySeen = (messageId) => {
   if (!messageId) return false;
   const now = Date.now();
@@ -81,7 +85,7 @@ const handleMessage = async (message, waId, customerName) => {
   const id = interactiveId(message);
   const isText = message.type === 'text' && !!text;
 
-  const conversation = await store.logMessage(phone, 'in', text || id || payload || `[${message.type}]`, {
+  let conversation = await store.logMessage(phone, 'in', text || id || payload || `[${message.type}]`, {
     messageType: (payload || id) ? 'button' : 'text',
     customerName,
   });
@@ -91,7 +95,14 @@ const handleMessage = async (message, waId, customerName) => {
   if (isText && await bookingBot.handleAddressFixText(phone, text)) return;
   if (isText && await bookingBot.handleTypedReply(phone, text)) return;
 
-  if (conversation?.status !== 'bot') return; // a person has taken over this conversation — the bot stays quiet
+  // A person has taken over this conversation, so the bot stays quiet — but not forever: if the customer asked for the team
+  // and nobody answered within HANDOFF_WAIT_MIN, or the admin went silent for HUMAN_IDLE_MIN, the bot takes over again.
+  if (conversation?.status !== 'bot') {
+    const since = conversation.statusChangedAt ? new Date(conversation.statusChangedAt).getTime() : new Date(conversation.updatedAt || 0).getTime();
+    const limitMin = conversation.status === 'needs_human' ? HANDOFF_WAIT_MIN : HUMAN_IDLE_MIN;
+    if (Date.now() - since < limitMin * 60 * 1000) return;
+    conversation = await store.setStatus(phone, 'bot');
+  }
 
   if (conversation.bookingDraft?.step && bookingFlow.isDraftStale(conversation.bookingDraft)) {
     await bookingFlow.clearDraft(phone);

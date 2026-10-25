@@ -24,7 +24,7 @@ const getConversation = (phone) => WhatsAppConversation.findOne({ phone });
 
 const setStatus = (phone, status) => WhatsAppConversation.findOneAndUpdate(
   { phone },
-  { $set: { status }, $setOnInsert: { phone } },
+  { $set: { status, statusChangedAt: new Date() }, $setOnInsert: { phone } },
   { upsert: true, new: true }
 );
 
