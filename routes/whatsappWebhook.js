@@ -145,6 +145,15 @@ const handleInterruption = async (phone, text, conversation) => {
     return menu.handle(phone, text, conversation);
   }
 
+  // They only opened the service list and now want to talk about their problem: nothing is committed yet, so leave the
+  // booking and let the AI chat (it ends with a "Book a service" button). A service name or a number is still an answer.
+  const step = conversation.bookingDraft && conversation.bookingDraft.step;
+  if (step === 'service' && tokens.length >= 3 && !/^\d+$/.test(norm) && !faq.findServices(norm).length) {
+    await bookingFlow.clearDraft(phone);
+    await chatbot.handleIncomingText(phone, text, { ...conversation, bookingDraft: undefined });
+    return true;
+  }
+
   const hasQuestionMark = /[?؟]/.test(text);
   if ((hasQuestionMark || tokens.length <= 6) && faq.matchIntent(norm) && await menu.handle(phone, text, conversation)) {
     await bookingFlow.resume(phone, isAr);

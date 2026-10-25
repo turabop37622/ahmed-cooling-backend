@@ -9,6 +9,7 @@ const axios = require('axios');
 const { escapeHtml } = require('./security');
 const { sendTextMessage, sendButtonsMessage } = require('./whatsappCloud');
 const { logMessage, setStatus } = require('./whatsappConversationStore');
+const WhatsAppMessage = require('../models/WhatsAppMessage');
 
 let catalogueServices = [];
 try { catalogueServices = require('../web/src/lib/services.json'); } catch { catalogueServices = []; }
@@ -42,6 +43,8 @@ Facts you can rely on:
 - A technician visit fee of SAR ${VISIT_CHARGE} applies in addition to the service price; the customer pays only after the service is done.
 - Emergency support line runs 24/7.
 - A customer can book a service right here on WhatsApp — if they want to book, tell them to send "menu" and tap "Book a service" (or say "I want to book a service"); a separate step-by-step flow handles it, not you. They can also book through the Ahmed Cooling app or website.
+- When the customer describes a problem with an appliance ("my inverter problem", "AC is not cooling"), have a short, friendly conversation: acknowledge it, ask ONE short question about the symptoms if it is unclear (what exactly happens, since when), mention what our technician would check, and tell them the price starts from the service price above (final after inspection). Never give risky do-it-yourself electrical or gas repair steps. Once you understand the problem, offer to book a technician. A "Book a service" button is shown right under your message, so say "tap Book a service below" instead of asking them to type anything.
+- You can see the recent messages of this conversation: use them, do not ask for something the customer already told you.
 - You cannot create, change, or look up a specific existing booking yourself — only the step-by-step WhatsApp booking flow, the app, or the website can.
 - Services offered (price is a starting price — final price is confirmed after inspection):
 ${lines}
@@ -58,8 +61,30 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // One retry on a rate limit / server error — Groq's free tier answers 429 under bursts, and that used to mean the
 // customer got no reply at all.
+// The last few messages of this chat (the customer's and ours), oldest first, so the model knows what was said before.
+// Buttons/lists/templates we sent are noise to it and are left out.
+const loadHistory = async (phone, userText) => {
+  try {
+    const rows = await WhatsAppMessage.find({ phone, messageType: { $in: ['text', 'button'] } }).sort({ createdAt: -1 }).limit(10).lean();
+    const turns = [];
+    for (const row of rows.reverse()) {
+      const body = String(row.body || '').trim();
+      if (!body || body.startsWith('[') || body.includes('[list:') || body.includes('[Template')) continue;
+      const role = row.direction === 'in' ? 'user' : 'assistant';
+      if (turns.length && turns[turns.length - 1].role === role) turns[turns.length - 1].content += `\n${body}`;
+      else turns.push({ role, content: body.slice(0, 600) });
+    }
+    // The message being answered is logged before we get here — it is added once, at the end
+    if (turns.length && turns[turns.length - 1].role === 'user' && turns[turns.length - 1].content.endsWith(userText)) turns.pop();
+    return turns.slice(-8);
+  } catch {
+    return [];
+  }
+};
+
 const callGroq = async (phone, userText, language) => {
   if (!GROQ_API_KEY) return null;
+  const history = await loadHistory(phone, userText);
   const langHint = language === 'ar'
     ? '\nThe customer chose Arabic as their language: answer in Arabic unless they clearly write in another language.'
     : language === 'en'
@@ -69,7 +94,7 @@ const callGroq = async (phone, userText, language) => {
     'https://api.groq.com/openai/v1/chat/completions',
     {
       model: GROQ_MODEL,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT() + langHint }, { role: 'user', content: userText }],
+      messages: [{ role: 'system', content: SYSTEM_PROMPT() + langHint }, ...history, { role: 'user', content: userText }],
       max_tokens: 500,
     },
     { headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
@@ -168,8 +193,19 @@ const handleIncomingText = async (phone, text, conversation) => {
   const handoff = reply.includes(HANDOFF_MARKER);
   const cleanReply = reply.replace(HANDOFF_MARKER, '').trim() || HANDOFF_ACK(isAr);
 
-  await sendTextMessage(phone, cleanReply);
-  await logMessage(phone, 'out', cleanReply, { messageType: 'text', sentBy: 'bot' });
+  if (handoff || cleanReply.length > 1000) {
+    await sendTextMessage(phone, cleanReply);
+    await logMessage(phone, 'out', cleanReply, { messageType: 'text', sentBy: 'bot' });
+  } else {
+    // The answer and the way forward in one message: book, back to the menu, or a person
+    const buttons = [
+      { id: 'menu_book', title: isAr ? 'احجز خدمة' : 'Book a service' },
+      { id: 'menu_main', title: isAr ? 'القائمة الرئيسية' : 'Main menu' },
+      { id: 'menu_human', title: isAr ? 'تحدث مع فريقنا' : 'Talk to our team' },
+    ];
+    await sendButtonsMessage(phone, cleanReply, buttons);
+    await logMessage(phone, 'out', cleanReply, { messageType: 'text', sentBy: 'bot' });
+  }
 
   if (handoff) {
     await setStatus(phone, 'needs_human');

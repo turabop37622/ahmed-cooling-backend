@@ -131,6 +131,10 @@ const handleMenuId = async (phone, id, conversation, lang) => {
   }
 };
 
+// "My inverter problem", "AC is not cooling": the customer is describing something, so talk to them (the AI) instead of
+// replying with a price card.
+const PROBLEM_RE = /\b(problem|issue|not\s*(working|cooling|cooling|starting)|broken|stopped|noise|noisy|leak|leaking|fault|trouble|smell|kharab|masla|mushkil|nahi\s*chal)\b|(مشكل|عطل|خراب|تعطل|لا\s*يعمل|ما\s*يشتغل|لا\s*يبرد|ما\s*يبرد|تسريب|صوت)/i;
+
 const GENERIC_HANDLED = ['areas', 'hours', 'payment', 'visit_fee', 'warranty', 'arrival', 'how_to_book', 'cancel_change', 'contact'];
 
 // Returns true if this message was fully answered here, false if the caller should fall back to the AI.
@@ -203,6 +207,7 @@ const handle = async (phone, input, conversation) => {
 
   // "I want to book ..." starts the booking chat; a bare mention of a service ("fridge repair?") gets its price card.
   if (await bookingFlow.handleMessage(phone, input, conversation)) return true;
+  if (services.length && PROBLEM_RE.test(`${input} ${norm}`)) return false; // let the AI discuss the problem
   if (services.length && faq.tokensOf(norm).length <= 10) { await answer(phone, lang, faq.serviceReply(services, lang)); return true; }
 
   return false;
