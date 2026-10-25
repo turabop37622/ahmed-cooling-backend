@@ -296,8 +296,10 @@ const advanceDraft = async (phone, rawInput, draft, isAr) => {
     const m = /^svc_(\d+)$/.exec(input);
     const index = m ? Number(m[1]) : (Number.isInteger(parseInt(input.trim(), 10)) ? parseInt(input.trim(), 10) - 1 : NaN);
     // Also accept the service typed by name ("AC repair", "غسالة") — the first catalogue match that is in the list.
-    const byName = m || Number.isInteger(parseInt(input.trim(), 10)) ? null
-      : faq.findServices(faq.normalize(input)).find((s) => LIST_SERVICES.some((l) => String(l._id) === String(s._id)));
+    const typedNorm = faq.normalize(input);
+    const looksLikeAName = faq.tokensOf(typedNorm).length <= 4 && !faq.PROBLEM_RE.test(`${input} ${typedNorm}`);
+    const byName = m || Number.isInteger(parseInt(input.trim(), 10)) || !looksLikeAName ? null
+      : faq.findServices(typedNorm).find((s) => LIST_SERVICES.some((l) => String(l._id) === String(s._id)));
     const item = byName ? LIST_SERVICES.find((l) => String(l._id) === String(byName._id)) : LIST_SERVICES[index];
     if (!item) {
       await reply(phone, L(isAr, 'Please pick a service from the list above.', 'الرجاء اختيار خدمة من القائمة أعلاه.'));

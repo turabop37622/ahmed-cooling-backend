@@ -88,14 +88,21 @@ const callGroq = async (phone, userText, language) => {
   const langHint = language === 'ar'
     ? '\nThe customer chose Arabic as their language: answer in Arabic unless they clearly write in another language.'
     : language === 'en'
-      ? '\nThe customer chose English as their language: answer in English unless they clearly write in another language.'
+      ? '\nThe customer chose English in the menu, but answer in the language of their last message: if it is Roman Urdu / Hindi (Urdu written in Latin letters) reply in Roman Urdu, if it is Arabic reply in Arabic, otherwise reply in English.'
       : '';
+  // Urdu typed in Latin letters is easy to mistake for English: spot it by its common words and say so explicitly.
+  const romanUrduWords = (userText.toLowerCase().match(/\b(meri|mera|mere|nahi|nahin|kar|karo|rahi|raha|rahe|hai|hain|kya|kaise|kab|aap|ap|ka|ki|ke|mein|main|se|ko|chahiye|karna|kharab|thanda|masla|hogaya|ho|gaya|bhai|shukriya)\b/g) || []).length;
+  const romanUrduHint = romanUrduWords >= 2 && !/[\u0600-\u06FF]/.test(userText)
+    ? '\nThe customer\'s last message is written in Roman Urdu: you MUST reply in Roman Urdu (Urdu in Latin letters, e.g. "Aap ka fridge kab se thanda nahi kar raha?"), not in English.'
+    : '';
   const request = () => axios.post(
     'https://api.groq.com/openai/v1/chat/completions',
     {
       model: GROQ_MODEL,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT() + langHint }, ...history, { role: 'user', content: userText }],
-      max_tokens: 500,
+      messages: [{ role: 'system', content: SYSTEM_PROMPT() + langHint + romanUrduHint }, ...history, { role: 'user', content: userText }],
+      // gpt-oss spends part of the budget on its own reasoning: keep that short and leave room for the whole answer
+      reasoning_effort: 'low',
+      max_tokens: 1200,
     },
     { headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
   );

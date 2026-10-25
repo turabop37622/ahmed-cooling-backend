@@ -41,6 +41,10 @@ const FILLER = new Set(['o', 'wa', 'dear', 'sir', 'madam', 'team', 'there', 'all
 const allTokensIn = (tokens, ...sets) => tokens.length > 0 && tokens.every((t) => sets.some((s) => s.has(t)));
 const anyTokenIn = (tokens, set) => tokens.some((t) => set.has(t));
 
+// "My inverter problem", "AC is not cooling", "meri fridge cooling nahi kar rahi", "المكيف لا يبرد": the customer is describing
+// something that is wrong, so it is a conversation (the AI), not a service choice or a price card.
+const PROBLEM_RE = /\b(problem|issue|not\s*(working|cooling|starting|turning|running)|broken|stopped|noise|noisy|leak|leaking|fault|trouble|smell|burning|kharab|masla|mushkil|nahi|nahin|band|garam|shor|awaaz|tapak|pani)\b|(مشكل|عطل|خراب|تعطل|لا\s*يعمل|ما\s*يشتغل|لا\s*يبرد|ما\s*يبرد|تسريب|صوت|يسرب|مايبرد|ما\s*تبرد|لا\s*تبرد|ما\s*تشتغل)/i;
+
 const isGreeting = (norm) => {
   const tokens = tokensOf(norm);
   return tokens.length <= 6 && anyTokenIn(tokens, GREETING) && allTokensIn(tokens, GREETING, FILLER);
@@ -233,6 +237,6 @@ const REPLIES = {
 };
 
 module.exports = {
-  normalize, tokensOf, isGreeting, isThanks, languageRequest, matchIntent, findServices,
+  normalize, tokensOf, PROBLEM_RE, isGreeting, isThanks, languageRequest, matchIntent, findServices,
   servicesOverview, serviceReply, REPLIES, PRICE_NOTE, VISIT_FEE,
 };
