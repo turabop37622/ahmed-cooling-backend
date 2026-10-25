@@ -12,6 +12,7 @@ const express = require('express');
 const router = express.Router();
 const bookingBot = require('../utils/whatsappBookingBot');
 const bookingFlow = require('../utils/whatsappBookingFlow');
+const media = require('../utils/whatsappMedia');
 const chatbot = require('../utils/whatsappChatbot');
 const menu = require('../utils/whatsappMenu');
 const faq = require('../utils/whatsappFaq');
@@ -80,10 +81,10 @@ const handleMessage = async (message, waId, customerName) => {
   if (!waId && !message.from) return;
   if (alreadySeen(message.id)) return;
   const phone = toWaId(message, waId);
-  const text = inboundText(message);
+  let text = inboundText(message);
   const payload = buttonPayload(message);
   const id = interactiveId(message);
-  const isText = message.type === 'text' && !!text;
+  let isText = message.type === 'text' && !!text;
 
   let conversation = await store.logMessage(phone, 'in', text || id || payload || `[${message.type}]`, {
     messageType: (payload || id) ? 'button' : 'text',
@@ -112,7 +113,18 @@ const handleMessage = async (message, waId, customerName) => {
   }
   if (message.type === 'location' && await bookingFlow.handleLocation(phone, message.location, conversation)) return;
 
-  if (UNSUPPORTED_TYPES.has(message.type)) { await menu.handleUnsupported(phone, conversation); return; }
+  // A photo goes onto the customer's active booking; a voice note becomes text and is handled like a typed message.
+  if (message.type === 'image' && await media.handleImage(phone, message, conversation.language === 'ar')) return;
+  if (message.type === 'audio' || message.type === 'voice') {
+    const heard = await media.transcribe(message);
+    if (heard) {
+      text = heard;
+      isText = true;
+      await store.logMessage(phone, 'in', `🎤 ${heard}`, { messageType: 'text' });
+    }
+  }
+
+  if (!isText && UNSUPPORTED_TYPES.has(message.type)) { await menu.handleUnsupported(phone, conversation); return; }
 
   const input = id || (isText ? text : null);
   if (!input) return;
