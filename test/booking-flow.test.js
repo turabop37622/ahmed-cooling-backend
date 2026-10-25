@@ -622,6 +622,29 @@ test('booking create: an auto-assigned booking is returned as assigned and the t
   assert.ok(!notifications.some((n) => n.data?.kind === 'job'));
 });
 
+test('booking create with WhatsApp on: nothing goes to a technician until the customer confirms on WhatsApp', async () => {
+  const whatsappCloud = require('../utils/whatsappCloud');
+  const savedConfigured = whatsappCloud.isConfigured;
+  whatsappCloud.isConfigured = () => true;
+  try {
+    // A technician WOULD be available, but the booking must stay pending so the bot can ask the customer first.
+    autoAssignResult = (booking) => ({
+      booking: { ...booking, status: 'assigned', technician: IDS.tech, assignedBy: 'auto', assignedAt: new Date() },
+      technician: { _id: IDS.tech, fullName: 'Tech' },
+    });
+    notifications = [];
+    const res = await call('POST', '/public', IDS.customer, goodBooking);
+    assert.equal(res.status, 201);
+    assert.equal(res.json.data.booking.status, 'pending', 'still pending, waiting for the customer\'s WhatsApp confirmation');
+    await new Promise((r) => setTimeout(r, 30));
+    assert.ok(!notifications.some((n) => n.data?.kind === 'job'), 'no technician was told');
+    assert.ok(!notifications.some((n) => n.data?.event === 'assigned'), 'the customer was not told a technician was assigned');
+  } finally {
+    whatsappCloud.isConfigured = savedConfigured;
+    autoAssignResult = null;
+  }
+});
+
 test('one active job: a technician cannot start a second job while one is on the way / in progress (409)', async () => {
   let busyQuery;
   Booking.findOne = async (filter) => {

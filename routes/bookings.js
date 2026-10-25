@@ -10,6 +10,7 @@ const { notifyUser, notifyTechnicianJob } = require('../utils/notify');
 // Used through the module object so tests can replace it.
 const autoAssign = require('../utils/autoAssign');
 const dispatch = require('../utils/dispatch');
+const whatsappCloud = require('../utils/whatsappCloud');
 const wallet = require('../utils/wallet');
 const { getCommissionRate, computeCommission, parseAmountCollected } = require('../utils/commission');
 // Shared with the website. Regular services are priced from the DATABASE (the source of truth); this file only adds
@@ -1000,9 +1001,12 @@ router.post('/public', auth, createLimiter, [
     sendAdminNotificationEmail({ ...emailData, emailNonce: emailActionNonce });
     notifyBooking(booking, 'received');
 
-    // Automatic technician assignment (utils/autoAssign.js). Never fails the request: nobody matching, or any error,
-    // leaves the booking pending for the admin.
-    const auto = await dispatch.dispatch(booking);
+    // A booking from the app / website is NOT passed to technicians yet: the WhatsApp bot (utils/whatsappBookingBot.js)
+    // messages the customer within seconds, and only their "Yes" confirms it and sends it on (finalizeConfirm). Assigning
+    // here would also hide it from the bot, which only looks at pending bookings. Without WhatsApp configured there is
+    // nobody to ask, so the old immediate assignment stays as the fallback. Never fails the request: nobody matching, or
+    // any error, leaves the booking pending for the admin.
+    const auto = whatsappCloud.isConfigured() ? null : await dispatch.dispatch(booking);
     if (auto && auto.mode === 'auto' && auto.booking) {
       notifyBooking(auto.booking, 'assigned');
       notifyTechnicianJob(auto.booking.technician, auto.booking, 'assigned').catch(() => {});
