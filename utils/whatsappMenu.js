@@ -17,6 +17,7 @@ const { phoneVariants } = require('./phone');
 const faq = require('./whatsappFaq');
 const chatbot = require('./whatsappChatbot');
 const bookingFlow = require('./whatsappBookingFlow');
+const manage = require('./whatsappManage');
 
 const L = (lang, en, ar) => (lang === 'ar' ? ar : en);
 const BODY_MAX = 1000; // WhatsApp allows 1024 characters in an interactive message body
@@ -119,6 +120,7 @@ const bookingStatusReply = async (phone, lang) => {
 const handleMenuId = async (phone, id, conversation, lang) => {
   // Changing language mid-booking keeps the booking (the webhook resumes it after the choice).
   if (id !== 'menu_book' && id !== 'menu_lang' && conversation?.bookingDraft?.step) await bookingFlow.clearDraft(phone);
+  if (/^menu_mb[rcy]?_/.test(id)) return manage.handleTap(phone, id, lang === 'ar');
   switch (id) {
     case 'menu_book': await bookingFlow.startFlow(phone, lang === 'ar'); return true;
     case 'menu_services': await answer(phone, lang, faq.servicesOverview(lang)); return true;
@@ -207,6 +209,7 @@ const handle = async (phone, input, conversation) => {
     await answer(phone, lang, services.length ? faq.serviceReply(services, lang) : faq.servicesOverview(lang));
     return true;
   }
+  if (intent === 'cancel_change') return manage.start(phone, lang === 'ar');
   if (intent && GENERIC_HANDLED.includes(intent)) { await answer(phone, lang, faq.REPLIES[intent](lang)); return true; }
 
   // "I want to book ..." starts the booking chat; a bare mention of a service ("fridge repair?") gets its price card.

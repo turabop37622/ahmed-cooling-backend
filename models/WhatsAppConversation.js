@@ -27,6 +27,8 @@ const whatsAppConversationSchema = new mongoose.Schema({
     serviceNameAr: String,
     // The service group the customer opened (utils/whatsappBookingFlow.js SERVICE_GROUPS) while choosing a service.
     group: String,
+    // Set while the customer is choosing a new date/time for this existing booking (utils/whatsappManage.js).
+    rescheduleId: String,
     date: String,
     time: String,
     address: String,

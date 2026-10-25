@@ -38,3 +38,34 @@ test('problem descriptions are recognised so they reach the AI instead of the pr
   assert.ok(faq.PROBLEM_RE.test('my fridge is not cooling'));
   assert.ok(!faq.PROBLEM_RE.test('AC repair'));
 });
+
+test('cancelling from WhatsApp runs the app cancel code for the customer\'s own open booking only', async () => {
+  const Booking = require('../models/Booking');
+  const cloud = require('../utils/whatsappCloud');
+  const store = require('../utils/whatsappConversationStore');
+  const bookingsRouter = require('../routes/bookings');
+  const sent = [];
+  const saved = { findOne: Booking.findOne, buttons: cloud.sendButtonsMessage, text: cloud.sendTextMessage, log: store.logMessage, cancel: bookingsRouter.cancelForOwner };
+  const id = '507f1f77bcf86cd799439016';
+  let cancelled = null;
+  Booking.findOne = async (q) => (String(q._id) === id ? { _id: id, user: 'u1', orderNumber: 'ORD-1', date: '2030-01-01', time: '10:00 AM', status: 'pending' } : null);
+  cloud.sendButtonsMessage = async (to, body, buttons) => { sent.push({ body, ids: buttons.map((b) => b.id) }); };
+  cloud.sendTextMessage = async (to, text) => { sent.push({ body: text, ids: [] }); };
+  store.logMessage = async () => {};
+  bookingsRouter.cancelForOwner = async (req, res, booking) => { cancelled = { user: req.user, id: booking._id }; return res.json({ success: true }); };
+  try {
+    delete require.cache[require.resolve('../utils/whatsappManage')];
+    const manage = require('../utils/whatsappManage');
+    await manage.handleTap('966512345678', `menu_mbc_${id}`, false);
+    assert.deepEqual(sent[0].ids, [`menu_mby_${id}`, `menu_mb_${id}`]);
+    assert.equal(cancelled, null, 'asking must not cancel');
+    await manage.handleTap('966512345678', `menu_mby_${id}`, false);
+    assert.deepEqual(cancelled, { user: { id: 'u1', role: 'customer' }, id });
+    await manage.handleTap('966512345678', 'menu_mby_507f1f77bcf86cd799439099', false); // someone else's / unknown
+    assert.match(sent[sent.length - 1].body, /no longer be changed/);
+  } finally {
+    Booking.findOne = saved.findOne; cloud.sendButtonsMessage = saved.buttons; cloud.sendTextMessage = saved.text;
+    store.logMessage = saved.log; bookingsRouter.cancelForOwner = saved.cancel;
+    delete require.cache[require.resolve('../utils/whatsappManage')];
+  }
+});

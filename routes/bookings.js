@@ -1104,6 +1104,9 @@ const createBookingForPhone = async ({ customerName, phone, serviceRecord, date,
   return auto && auto.booking ? auto.booking : booking;
 };
 router.createBookingForPhone = createBookingForPhone;
+// The WhatsApp bot (utils/whatsappManage.js) runs the same cancel / reschedule code as the app.
+router.cancelForOwner = cancelForOwner;
+router.rescheduleForOwner = rescheduleForOwner;
 
 router.get('/public/:bookingId', auth, async (req, res) => {
   try {

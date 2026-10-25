@@ -320,6 +320,11 @@ const advanceDraft = async (phone, rawInput, draft, isAr) => {
   }
   if (!tappedStep) {
     const t = input.trim();
+    if ((t === 'nav_back' || BACK_RE.test(t)) && draft.rescheduleId) {
+      await setDraft(phone, null);
+      await require('./whatsappManage').start(phone, isAr);
+      return;
+    }
     if ((t === 'nav_back' || BACK_RE.test(t)) && PREVIOUS_STEP[draft.step]) {
       await goToStep(phone, draft, PREVIOUS_STEP[draft.step], isAr);
       return;
@@ -400,6 +405,15 @@ const advanceDraft = async (phone, rawInput, draft, isAr) => {
         'I didn\'t understand that time — please pick one from the list, or type something like "3:30 PM".',
         'لم أفهم هذا الوقت — اختر من القائمة أو اكتب مثل "3:30 PM".'));
       await replyTimeList(phone, isAr, draft.date);
+      return;
+    }
+    if (draft.rescheduleId) {
+      const done = await require('./whatsappManage').finishReschedule(phone, { ...draft, time }, isAr);
+      if (done) await setDraft(phone, null);
+      else {
+        await setDraft(phone, { step: 'date', rescheduleId: draft.rescheduleId });
+        await replyDateList(phone, isAr);
+      }
       return;
     }
     const next = { ...draft, step: 'address', time };
@@ -490,6 +504,12 @@ const createFromDraft = async (phone, draft, isAr) => {
 
 const clearDraft = (phone) => setDraft(phone, null);
 
+// Choosing a new date and time for an existing booking: the usual date and time lists, then utils/whatsappManage.js applies it.
+const startReschedule = async (phone, booking, isAr) => {
+  await setDraft(phone, { step: 'date', rescheduleId: String(booking._id) });
+  await replyDateList(phone, isAr);
+};
+
 // After the customer interrupted the chat (asked a question, switched language), re-asks whatever step they were on.
 const resume = async (phone, isAr) => {
   const conversation = await draftStatus(phone);
@@ -552,4 +572,4 @@ const handleLocation = async (phone, location, conversation) => {
 const DRAFT_TTL_MS = 3 * 60 * 60 * 1000;
 const isDraftStale = (draft) => !draft?.updatedAt || Date.now() - new Date(draft.updatedAt).getTime() > DRAFT_TTL_MS;
 
-module.exports = { handleMessage, startFlow, clearDraft, resume, handleLocation, isDraftStale, looksLikeAnswer, SERVICE_GROUPS, groupServices };
+module.exports = { handleMessage, startFlow, clearDraft, resume, handleLocation, isDraftStale, startReschedule, looksLikeAnswer, SERVICE_GROUPS, groupServices };
