@@ -3,7 +3,9 @@
 //   WHATSAPP_TECH_OFFER_TEMPLATE        body: 3 variables  {{1}} service  {{2}} when  {{3}} area
 //   WHATSAPP_APPLICATION_RESULT_TEMPLATE body: 3 variables {{1}} name {{2}} approved / not approved {{3}} details (English | Arabic, one line)
 //   WHATSAPP_CUSTOMER_ASSIGNED_TEMPLATE body: 4 variables  {{1}} customer {{2}} order number {{3}} technician {{4}} technician phone
-// Both use WHATSAPP_DISPATCH_TEMPLATE_LANG (default en_US). While a template name is not configured, a plain text message
+//   WHATSAPP_ON_THE_WAY_TEMPLATE        body: 3 variables  {{1}} customer {{2}} order number {{3}} technician (name and phone)
+//   WHATSAPP_COMPLETED_TEMPLATE         body: 2 variables  {{1}} customer {{2}} order number
+// All use WHATSAPP_DISPATCH_TEMPLATE_LANG (default en_US). While a template name is not configured, a plain text message
 // is tried instead (Meta delivers it only if the person messaged this number in the last 24 hours). A send never throws:
 // the app push notification (utils/notify.js) is the main channel, WhatsApp is the extra one.
 const whatsappCloud = require('./whatsappCloud');
@@ -14,6 +16,8 @@ const LANG = process.env.WHATSAPP_DISPATCH_TEMPLATE_LANG || 'en_US';
 const TECH_OFFER_TEMPLATE = process.env.WHATSAPP_TECH_OFFER_TEMPLATE || '';
 const CUSTOMER_ASSIGNED_TEMPLATE = process.env.WHATSAPP_CUSTOMER_ASSIGNED_TEMPLATE || '';
 const APPLICATION_RESULT_TEMPLATE = process.env.WHATSAPP_APPLICATION_RESULT_TEMPLATE || '';
+const ON_THE_WAY_TEMPLATE = process.env.WHATSAPP_ON_THE_WAY_TEMPLATE || '';
+const COMPLETED_TEMPLATE = process.env.WHATSAPP_COMPLETED_TEMPLATE || '';
 
 const serviceName = (booking) => {
   const svc = booking.service && typeof booking.service === 'object' ? booking.service : {};
@@ -67,6 +71,27 @@ const assignedToCustomer = (booking, technician) => {
   return send(booking.phone, CUSTOMER_ASSIGNED_TEMPLATE, [name, booking.orderNumber, technician.fullName, technician.phone || '-'], text);
 };
 
+// Customer: the technician is on the way.
+const onTheWayToCustomer = (booking, technician) => {
+  const isAr = booking.language === 'ar';
+  const name = booking.customerName || (isAr ? 'عميلنا' : 'Customer');
+  const who = technician ? `${technician.fullName}${technician.phone ? ` (${technician.phone})` : ''}` : (isAr ? 'فريقنا' : 'our technician');
+  const text = isAr
+    ? `مرحباً ${name}، الفني ${who} في الطريق إليك لحجزك رقم ${booking.orderNumber}.`
+    : `Hello ${name}, ${who} is on the way for your booking #${booking.orderNumber}.`;
+  return send(booking.phone, ON_THE_WAY_TEMPLATE, [name, booking.orderNumber, who], text);
+};
+
+// Customer: the work is done; asks for a rating (the customer can reply here or rate in the app).
+const completedToCustomer = (booking) => {
+  const isAr = booking.language === 'ar';
+  const name = booking.customerName || (isAr ? 'عميلنا' : 'Customer');
+  const text = isAr
+    ? `مرحباً ${name}، تم إنجاز حجزك رقم ${booking.orderNumber}. شكراً لاختيارك ورشة أحمد للتبريد! نسعد بتقييمك من التطبيق (حجوزاتي).`
+    : `Hello ${name}, your booking #${booking.orderNumber} is complete. Thank you for choosing Ahmed Cooling Workshop! We would love your rating — open My Bookings in the app.`;
+  return send(booking.phone, COMPLETED_TEMPLATE, [name, booking.orderNumber], text);
+};
+
 // Customer: the technician gave it back, we are finding another.
 const technicianChangedToCustomer = (booking) => {
   const isAr = booking.language === 'ar';
@@ -95,4 +120,4 @@ const applicationDecision = (application, decision) => {
   return send(application.phone, APPLICATION_RESULT_TEMPLATE, [name, label, detail], text);
 };
 
-module.exports = { offerToTechnician, lateToTechnician, assignedToCustomer, technicianChangedToCustomer, applicationDecision };
+module.exports = { onTheWayToCustomer, completedToCustomer, offerToTechnician, lateToTechnician, assignedToCustomer, technicianChangedToCustomer, applicationDecision };

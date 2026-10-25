@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const Booking = require('../models/Booking');
 const Service = require('../models/Service');
 const User = require('../models/User');
+const dispatchWhatsApp = require('../utils/dispatchWhatsApp');
 const Technician = require('../models/Technician');
 const { notifyUser, notifyTechnicianJob } = require('../utils/notify');
 // Used through the module object so tests can replace it.
@@ -1365,6 +1366,15 @@ router.put('/:id/status', auth, async (req, res) => {
         ...emailServiceFields(updated), date: updated.date, time: updated.time,
         cancellationReason: updated.cancellationReason,
       });
+    }
+
+    if (status === 'on_the_way' || status === 'completed') {
+      // The customer's WhatsApp gets the same news as the app push. Never blocks or fails the status change.
+      (async () => {
+        if (status === 'completed') return dispatchWhatsApp.completedToCustomer(updated);
+        const tech = updated.technician ? await User.findById(updated.technician).select('fullName phone') : null;
+        return dispatchWhatsApp.onTheWayToCustomer(updated, tech);
+      })().catch(() => {});
     }
 
     notifyBooking(updated, status);
