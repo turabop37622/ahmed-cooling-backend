@@ -168,7 +168,7 @@ const handle = async (phone, input, conversation) => {
   if (conversation) conversation.language = lang;
 
   if (input.startsWith('menu_')) return handleMenuId(phone, input, conversation, lang);
-  if (/^(svc_|date_|time_|confirm_|nav_|lang_)/.test(input)) { await sendMainMenu(phone, lang); return true; } // a stale tap
+  if (/^(cat_|svc_|date_|time_|confirm_|nav_|lang_)/.test(input)) { await sendMainMenu(phone, lang); return true; } // a stale tap
 
   const norm = faq.normalize(input);
   if (!norm) return false;

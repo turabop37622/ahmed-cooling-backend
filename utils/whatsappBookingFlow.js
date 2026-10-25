@@ -24,11 +24,20 @@ try { catalogueServices = require('../web/src/lib/services.json'); } catch { cat
 // Package catalogue entries carry their own fixed price (visit fee included) and are not real Service documents.
 const isPackage = (item) => item.isPackage === true;
 
-// WhatsApp list messages allow at most 10 rows total — popular services first, then whatever else fits.
-const LIST_SERVICES = [
-  ...catalogueServices.filter((s) => s.isPopular),
-  ...catalogueServices.filter((s) => !s.isPopular),
-].slice(0, 10);
+// A WhatsApp list shows at most 10 rows, and the catalogue has more services than that, so the customer first picks a
+// group (4 rows) and then a service in it (at most 10). Every service is reachable; popular ones come first.
+const SERVICE_GROUPS = [
+  { key: 'ac', en: 'AC & cooling', ar: 'المكيفات والتبريد', categories: ['ac'] },
+  { key: 'fridge', en: 'Fridge & washing machine', ar: 'الثلاجات والغسالات', categories: ['refrigerator', 'washing-machine'] },
+  { key: 'stove', en: 'Stove & microwave', ar: 'الأفران والميكروويف', categories: ['stove'] },
+  { key: 'home', en: 'General & home care', ar: 'صيانة عامة ومنزلية', categories: ['general'] },
+];
+const groupServices = (group) => catalogueServices
+  .map((service, index) => ({ service, index }))
+  .filter(({ service }) => group.categories.includes(service.category))
+  .sort((a, b) => Number(!!b.service.isPopular) - Number(!!a.service.isPopular) || a.index - b.index)
+  .slice(0, 10);
+const LIST_SERVICES = catalogueServices; // anything that can be booked (used for "is the catalogue loaded")
 
 const BOOKING_INTENT_RE = /\b(book|booking|schedule|appointment)\b|(احجز|حجز|موعد|اريد\s*حجز|أريد\s*حجز)|(\bbook\s*karna\b|\bbooking\s*karni\b)/i;
 const CANCEL_RE = /\b(cancel|stop|nevermind|never mind)\b|(الغاء|إلغاء|لا أريد)|(\bcancel\s*kar\b|\brehnay\s*do\b)/i;
@@ -125,16 +134,27 @@ const replyConfirm = async (phone, d, isAr) => {
     ]);
 };
 
-const replyServiceList = async (phone, isAr) => {
-  const bodyText = L(isAr, 'Which service would you like to book?', 'ما الخدمة التي تريد حجزها؟');
-  const rows = LIST_SERVICES.map((s, i) => ({
-    id: `svc_${i}`,
-    title: isAr && s.nameAr ? s.nameAr : s.name,
-    description: L(isAr, `From SAR ${s.basePrice}`, `يبدأ من ${s.basePrice} ريال`),
-  }));
-  await sendListMessage(phone, bodyText, L(isAr, 'View services', 'عرض الخدمات'), [{ rows }]);
+// group = a SERVICE_GROUPS key: the services in it; no group: the list of groups.
+const replyServiceList = async (phone, isAr, groupKey) => {
+  const group = SERVICE_GROUPS.find((g) => g.key === groupKey);
+  const bodyText = group
+    ? L(isAr, `${group.en}: which service would you like to book?`, `${group.ar}: ما الخدمة التي تريد حجزها؟`)
+    : L(isAr, 'What do you need help with?', 'بماذا نساعدك؟');
+  const rows = group
+    ? groupServices(group).map(({ service: s, index }) => ({
+      id: `svc_${index}`,
+      title: (isAr && s.nameAr ? s.nameAr : s.name).slice(0, 24),
+      description: L(isAr, `From SAR ${s.basePrice}`, `يبدأ من ${s.basePrice} ريال`),
+    }))
+    : SERVICE_GROUPS.map((g) => ({
+      id: `cat_${g.key}`,
+      title: (isAr ? g.ar : g.en).slice(0, 24),
+      description: L(isAr, `${groupServices(g).length} services`, `${groupServices(g).length} خدمات`),
+    }));
+  await sendListMessage(phone, bodyText, group ? L(isAr, 'View services', 'عرض الخدمات') : L(isAr, 'Choose a type', 'اختر النوع'), [{ rows }]);
   await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
-  await replyNav(phone, isAr, 'service');
+  // Inside a group there is somewhere to go back to (the groups); on the groups list there is not
+  await replyNav(phone, isAr, group ? 'date' : 'service');
 };
 
 // A real "year-month-day" only if that calendar date actually exists (isIsoDate round-trips it), else null.
@@ -204,7 +224,7 @@ const YES_NO_WORDS = /\b(yes|yeah|yep|ok|okay|confirm|no|nope|cancel|change|edit
 const looksLikeAnswer = (step, rawInput) => {
   const input = asciiDigits(String(rawInput || '')).trim();
   if (!input) return false;
-  if (/^(svc_|date_|time_|confirm_|nav_)/.test(input)) return true;
+  if (/^(cat_|svc_|date_|time_|confirm_|nav_)/.test(input)) return true;
   if (BACK_RE.test(input) || CANCEL_RE.test(input) || CHANGE_RE.some(([, re]) => re.test(input))) return true;
   switch (step) {
     case 'service': return /^\d+$/.test(input) || faq.findServices(faq.normalize(input)).length > 0;
@@ -266,7 +286,7 @@ const CHANGE_RE = [
 
 // Re-sends the question for whatever step the draft is on.
 const promptStep = async (phone, draft, isAr) => {
-  if (draft.step === 'service') await replyServiceList(phone, isAr);
+  if (draft.step === 'service') await replyServiceList(phone, isAr, draft.group);
   else if (draft.step === 'date') await replyDateList(phone, isAr);
   else if (draft.step === 'time') await replyTimeList(phone, isAr, draft.date);
   else if (draft.step === 'address') {
@@ -293,7 +313,7 @@ const advanceDraft = async (phone, rawInput, draft, isAr) => {
   const input = asciiDigits(rawInput);
 
   // A tap on an old list/button from an earlier step (or a stale confirm) — just ask the current question again.
-  const tappedStep = /^svc_/.test(input) ? 'service' : /^date_/.test(input) ? 'date' : /^time_/.test(input) ? 'time' : /^confirm_/.test(input) ? 'confirm' : null;
+  const tappedStep = /^(cat_|svc_)/.test(input) ? 'service' : /^date_/.test(input) ? 'date' : /^time_/.test(input) ? 'time' : /^confirm_/.test(input) ? 'confirm' : null;
   if (tappedStep && tappedStep !== draft.step) {
     await promptStep(phone, draft, isAr);
     return;
@@ -313,17 +333,28 @@ const advanceDraft = async (phone, rawInput, draft, isAr) => {
   }
 
   if (draft.step === 'service') {
-    const m = /^svc_(\d+)$/.exec(input);
-    const index = m ? Number(m[1]) : (Number.isInteger(parseInt(input.trim(), 10)) ? parseInt(input.trim(), 10) - 1 : NaN);
-    // Also accept the service typed by name ("AC repair", "غسالة") — the first catalogue match that is in the list.
+    // 1) a group tapped: show its services
+    const groupTap = /^cat_(\w+)$/.exec(input);
+    if (groupTap && SERVICE_GROUPS.some((g) => g.key === groupTap[1])) {
+      await setDraft(phone, { step: 'service', group: groupTap[1] });
+      await replyServiceList(phone, isAr, groupTap[1]);
+      return;
+    }
+    // 2) "Back" inside a group: the groups again
+    if (draft.group && (input === 'nav_back' || BACK_RE.test(input.trim()))) {
+      await setDraft(phone, { step: 'service' });
+      await replyServiceList(phone, isAr);
+      return;
+    }
+    // 3) a service tapped, or typed by name ("AC repair", "غسالة"): a short phrase only, never a sentence about a problem
+    const tapped = /^svc_(\d+)$/.exec(input);
     const typedNorm = faq.normalize(input);
     const looksLikeAName = faq.tokensOf(typedNorm).length <= 4 && !faq.PROBLEM_RE.test(`${input} ${typedNorm}`);
-    const byName = m || Number.isInteger(parseInt(input.trim(), 10)) || !looksLikeAName ? null
-      : faq.findServices(typedNorm).find((s) => LIST_SERVICES.some((l) => String(l._id) === String(s._id)));
-    const item = byName ? LIST_SERVICES.find((l) => String(l._id) === String(byName._id)) : LIST_SERVICES[index];
+    const byName = tapped || !looksLikeAName ? null : faq.findServices(typedNorm)[0];
+    const item = tapped ? catalogueServices[Number(tapped[1])] : byName;
     if (!item) {
-      await reply(phone, L(isAr, 'Please pick a service from the list above.', 'الرجاء اختيار خدمة من القائمة أعلاه.'));
-      await replyServiceList(phone, isAr);
+      await reply(phone, L(isAr, 'Please pick one from the list above.', 'الرجاء الاختيار من القائمة أعلاه.'));
+      await replyServiceList(phone, isAr, draft.group);
       return;
     }
     await setDraft(phone, { step: 'date', serviceId: String(item._id), serviceName: item.name, serviceNameAr: item.nameAr || item.name });
@@ -521,4 +552,4 @@ const handleLocation = async (phone, location, conversation) => {
 const DRAFT_TTL_MS = 3 * 60 * 60 * 1000;
 const isDraftStale = (draft) => !draft?.updatedAt || Date.now() - new Date(draft.updatedAt).getTime() > DRAFT_TTL_MS;
 
-module.exports = { handleMessage, startFlow, clearDraft, resume, handleLocation, isDraftStale, looksLikeAnswer };
+module.exports = { handleMessage, startFlow, clearDraft, resume, handleLocation, isDraftStale, looksLikeAnswer, SERVICE_GROUPS, groupServices };

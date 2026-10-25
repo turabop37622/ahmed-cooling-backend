@@ -25,6 +25,8 @@ const whatsAppConversationSchema = new mongoose.Schema({
     serviceId: String,
     serviceName: String,
     serviceNameAr: String,
+    // The service group the customer opened (utils/whatsappBookingFlow.js SERVICE_GROUPS) while choosing a service.
+    group: String,
     date: String,
     time: String,
     address: String,
