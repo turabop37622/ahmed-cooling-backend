@@ -98,7 +98,9 @@ const handleMessage = async (message, waId, customerName) => {
   // A person has taken over this conversation, so the bot stays quiet — but not forever: if the customer asked for the team
   // and nobody answered within HANDOFF_WAIT_MIN, or the admin went silent for HUMAN_IDLE_MIN, the bot takes over again.
   if (conversation?.status !== 'bot') {
-    const since = conversation.statusChangedAt ? new Date(conversation.statusChangedAt).getTime() : new Date(conversation.updatedAt || 0).getTime();
+    // A hand-off recorded before statusChangedAt existed has no date at all: it is old, so it counts as expired (the row's
+    // updatedAt cannot stand in for it, every incoming message has just bumped that).
+    const since = conversation.statusChangedAt ? new Date(conversation.statusChangedAt).getTime() : 0;
     const limitMin = conversation.status === 'needs_human' ? HANDOFF_WAIT_MIN : HUMAN_IDLE_MIN;
     if (Date.now() - since < limitMin * 60 * 1000) return;
     conversation = await store.setStatus(phone, 'bot');
