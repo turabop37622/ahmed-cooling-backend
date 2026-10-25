@@ -255,6 +255,27 @@ router.get('/wallet', async (req, res) => {
   }
 });
 
+// The phone reports its position (when the technician opens the Available tab); open bookings are sorted by it and the
+// admin can see it. A [0, 0] or out-of-range point is refused.
+router.put('/location', async (req, res) => {
+  try {
+    const latitude = Number(req.body && req.body.latitude);
+    const longitude = Number(req.body && req.body.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180 || (latitude === 0 && longitude === 0)) {
+      return res.status(400).json({ success: false, message: 'A valid location is required' });
+    }
+    const profile = await Technician.findOneAndUpdate(
+      { user: req.user.id },
+      { $set: { 'currentLocation.type': 'Point', 'currentLocation.coordinates': [longitude, latitude], 'currentLocation.lastUpdated': new Date() } },
+      { new: true }
+    ).select('_id').lean();
+    if (!profile) return res.status(404).json({ success: false, message: 'Technician profile not found' });
+    res.json({ success: true });
+  } catch (err) {
+    serverError(res);
+  }
+});
+
 router.put('/availability', async (req, res) => {
   try {
     const { availability } = req.body;
