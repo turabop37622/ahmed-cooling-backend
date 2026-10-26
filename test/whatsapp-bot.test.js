@@ -69,3 +69,8 @@ test('cancelling from WhatsApp runs the app cancel code for the customer\'s own 
     delete require.cache[require.resolve('../utils/whatsappManage')];
   }
 });
+
+test('a short Roman Urdu question about another country counts as Roman Urdu', () => {
+  assert.equal(faq.isRomanUrdu('kia tum qatar ma services provide karty ho >'), true);
+  assert.equal(faq.isRomanUrdu('AC repair price'), false);
+});

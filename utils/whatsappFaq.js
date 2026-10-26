@@ -47,7 +47,7 @@ const PROBLEM_RE = /\b(problem|issue|not\s*(working|cooling|starting|turning|run
 
 // Urdu typed in Latin letters ("meri fridge cooling nahi kar rahi"): at least two common Urdu words and no Arabic script.
 // Our tayyar (canned) answers exist in English and Arabic only, so these messages go to the AI, which answers in Roman Urdu.
-const ROMAN_URDU_WORDS = /\b(meri|mera|mere|nahi|nahin|kar|karo|karna|karni|karein|rahi|raha|rahe|hai|hain|hy|kya|kaise|kab|kitna|kitne|kitni|aap|ap|ka|ki|ke|mein|main|se|ko|chahiye|chahie|kharab|thanda|masla|hogaya|gaya|gayi|bhai|shukriya|jaldi|abhi|pehle|baad|kitne|batao|bataye|bata|dijiye|dein|lagta|lagti)\b/g;
+const ROMAN_URDU_WORDS = /\b(meri|mera|mere|nahi|nahin|kar|karo|karna|karni|karein|rahi|raha|rahe|hai|hain|hy|kya|kaise|kab|kitna|kitne|kitni|aap|ap|ka|ki|ke|mein|main|se|ko|chahiye|chahie|kharab|thanda|masla|hogaya|gaya|gayi|bhai|shukriya|jaldi|abhi|pehle|baad|kitne|batao|bataye|bata|dijiye|dein|lagta|lagti|kia|kiya|tum|tumhe|tumhare|hum|humare|hamare|ma|mai|ho|hon|hun|karty|karte|karta|karti|krty|kartay|sakta|sakte|sakti|kahan|kaha|koi|bhi|aur|wala|wali|walay|kuch|kab|ku|kyun|kyu|agr|agar|thk|theek|ha|han|haan|lakin|lekin|jab|tab|abhi|chai|chaiye)\b/g;
 const isRomanUrdu = (text) => {
   const raw = String(text || '');
   if (/[\u0600-\u06FF]/.test(raw)) return false;
