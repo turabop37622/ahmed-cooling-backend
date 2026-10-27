@@ -78,13 +78,20 @@ router.get('/technician-applications/:id', async (req, res) => {
   }
 });
 
+// What the admin sees when an application is no longer waiting for a decision.
+const ALREADY_DECIDED = {
+  approved: 'This application was already approved',
+  rejected: 'This application was already rejected',
+  changes_requested: 'This application was sent back to the applicant for changes. Wait for them to resubmit it.',
+};
+
 // Optional body: { cities, specialties, autoAssign } — the admin can correct what the applicant chose before approving.
 router.post('/technician-applications/:id/approve', async (req, res) => {
   try {
     if (!isObjectId(req.params.id)) return res.status(404).json({ success: false, message: 'Application not found' });
     const a = await TechnicianApplication.findById(req.params.id).select('+passwordHash');
     if (!a) return res.status(404).json({ success: false, message: 'Application not found' });
-    if (a.status !== 'pending') return res.status(409).json({ success: false, message: `This application was already ${a.status}` });
+    if (a.status !== 'pending') return res.status(409).json({ success: false, message: ALREADY_DECIDED[a.status] || 'This application was already decided' });
 
     if (await User.findOne({ phone: { $in: phoneVariants(a.phone) }, role: { $in: ['technician', 'admin'] } }).select('_id').lean()) {
       return res.status(409).json({ success: false, message: 'A technician or admin already uses this phone number' });
