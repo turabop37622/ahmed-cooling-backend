@@ -80,5 +80,5 @@ test('the bot never states a service duration or a warranty', () => {
     faq.serviceReply(catalogue.slice(0, catalogue.length), 'en'), faq.serviceReply(catalogue, 'ar'),
     faq.servicesOverview('en'), faq.REPLIES.warranty('en'), faq.REPLIES.arrival('en'), faq.REPLIES.arrival('ar'),
   ].join('\n');
-  assert.doesNotMatch(text, /-day warranty|about d|d+ ?hours|d+ ?minutes|المدة|ضمان d/i);
+  assert.doesNotMatch(text, /-day warranty|about \d|\d+ ?hours|\d+ ?minutes|المدة|ضمان \d/i);
 });
