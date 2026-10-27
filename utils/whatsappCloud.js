@@ -34,12 +34,24 @@ const toWaId = (phone) => String(phone || '').replace(/^\+/, '');
 // Sends an approved message template (required for the FIRST message we send about a booking, since the
 // customer hasn't messaged us in the last 24h). `components` follows Meta's template-components shape, e.g.
 // [{ type: 'body', parameters: [{ type: 'text', text: 'Ahmed' }, ...] }].
-const sendTemplateMessage = (to, templateName, languageCode, components = []) => post({
-  messaging_product: 'whatsapp',
-  to: toWaId(to),
-  type: 'template',
-  template: { name: templateName, language: { code: languageCode }, components },
-});
+// Meta's "English" is code en and "English (US)" is en_US; a template exists under only one of them and the wrong one
+// fails with error 132001. So if that happens, the other English code is tried once.
+const OTHER_ENGLISH = { en: 'en_US', en_US: 'en' };
+const sendTemplateMessage = async (to, templateName, languageCode, components = []) => {
+  const send = (code) => post({
+    messaging_product: 'whatsapp',
+    to: toWaId(to),
+    type: 'template',
+    template: { name: templateName, language: { code }, components },
+  });
+  try {
+    return await send(languageCode);
+  } catch (err) {
+    const other = OTHER_ENGLISH[languageCode];
+    if (other && err.response?.data?.error?.code === 132001) return send(other);
+    throw err;
+  }
+};
 
 // Freeform text — only allowed within 24h of the customer's last message to us (true once they've replied
 // to the confirmation request, e.g. while we're collecting a cancellation reason).

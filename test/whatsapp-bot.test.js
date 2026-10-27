@@ -82,3 +82,27 @@ test('the bot never states a service duration or a warranty', () => {
   ].join('\n');
   assert.doesNotMatch(text, /-day warranty|about \d|\d+ ?hours|\d+ ?minutes|المدة|ضمان \d/i);
 });
+
+test('a template approved under the other English code (en / en_US) is retried once with it', async () => {
+  process.env.WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || 'test-id';
+  process.env.WHATSAPP_CLOUD_API_TOKEN = process.env.WHATSAPP_CLOUD_API_TOKEN || 'test-token';
+  const axios = require('axios');
+  const realPost = axios.post;
+  const codes = [];
+  axios.post = async (url, payload) => {
+    codes.push(payload.template.language.code);
+    if (payload.template.language.code === 'en_US') {
+      const err = new Error('template not found'); err.response = { data: { error: { code: 132001 } } }; throw err;
+    }
+    return { data: { messages: [{ id: 'x' }] } };
+  };
+  try {
+    delete require.cache[require.resolve('../utils/whatsappCloud')];
+    const cloud = require('../utils/whatsappCloud');
+    await cloud.sendTemplateMessage('966500000001', 'booking_on_the_way', 'en_US', []);
+    assert.deepEqual(codes, ['en_US', 'en']);
+  } finally {
+    axios.post = realPost;
+    delete require.cache[require.resolve('../utils/whatsappCloud')];
+  }
+});
