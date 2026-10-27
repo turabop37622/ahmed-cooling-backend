@@ -106,3 +106,27 @@ test('a template approved under the other English code (en / en_US) is retried o
     delete require.cache[require.resolve('../utils/whatsappCloud')];
   }
 });
+
+test('a template Meta refuses is remembered for the admin panel, with Meta\'s code and reason', async () => {
+  process.env.WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || 'test-id';
+  process.env.WHATSAPP_CLOUD_API_TOKEN = process.env.WHATSAPP_CLOUD_API_TOKEN || 'test-token';
+  const axios = require('axios');
+  const realPost = axios.post;
+  axios.post = async () => {
+    const err = new Error('Request failed with status code 400');
+    err.response = { data: { error: { code: 131042, message: 'Business eligibility payment issue' } } };
+    throw err;
+  };
+  try {
+    delete require.cache[require.resolve('../utils/whatsappCloud')];
+    const cloud = require('../utils/whatsappCloud');
+    await assert.rejects(cloud.sendTemplateMessage('966500000001', 'booking_confirmation', 'en_US', []));
+    const log = cloud.getTemplateLog();
+    assert.equal(log.lastError.code, 131042);
+    assert.equal(log.lastError.template, 'booking_confirmation');
+    assert.match(log.lastError.message, /payment/);
+  } finally {
+    axios.post = realPost;
+    delete require.cache[require.resolve('../utils/whatsappCloud')];
+  }
+});

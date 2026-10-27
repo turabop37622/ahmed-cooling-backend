@@ -37,7 +37,28 @@ const toWaId = (phone) => String(phone || '').replace(/^\+/, '');
 // Meta's "English" is code en and "English (US)" is en_US; a template exists under only one of them and the wrong one
 // fails with error 132001. So if that happens, the other English code is tried once.
 const OTHER_ENGLISH = { en: 'en_US', en_US: 'en' };
+// The last template send that worked and the last one Meta refused, for the admin panel (utils/whatsappHealth.js):
+// template messages are what reach customers who have not written to us, so a refusal there is otherwise invisible.
+const templateLog = { lastOk: null, lastError: null };
+const recordTemplate = (templateName, err) => {
+  if (!err) { templateLog.lastOk = { template: templateName, at: new Date() }; return; }
+  const meta = err.response?.data?.error || {};
+  templateLog.lastError = {
+    template: templateName, at: new Date(), code: meta.code || null,
+    message: meta.error_data?.details || meta.message || err.message,
+  };
+};
 const sendTemplateMessage = async (to, templateName, languageCode, components = []) => {
+  try {
+    const data = await sendTemplateOnce(to, templateName, languageCode, components);
+    recordTemplate(templateName);
+    return data;
+  } catch (err) {
+    recordTemplate(templateName, err);
+    throw err;
+  }
+};
+const sendTemplateOnce = async (to, templateName, languageCode, components) => {
   const send = (code) => post({
     messaging_product: 'whatsapp',
     to: toWaId(to),
@@ -129,4 +150,6 @@ const sendLocationRequest = (to, bodyText) => post({
   },
 });
 
-module.exports = { isConfigured, probe, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, sendLocationRequest, toWaId };
+const getTemplateLog = () => ({ ...templateLog });
+
+module.exports = { getTemplateLog, isConfigured, probe, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, sendLocationRequest, toWaId };

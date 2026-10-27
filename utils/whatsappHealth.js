@@ -76,6 +76,6 @@ const start = () => {
   console.log('✅ WhatsApp health monitor started (checks Meta access every 10 minutes).');
 };
 
-const getState = () => ({ ...state });
+const getState = () => ({ ...state, templates: whatsappCloud.getTemplateLog() });
 
 module.exports = { start, check, getState };
