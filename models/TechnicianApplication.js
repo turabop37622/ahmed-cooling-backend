@@ -8,6 +8,8 @@ const technicianApplicationSchema = new mongoose.Schema({
   phone: { type: String, required: true, trim: true, index: true },
   email: { type: String, trim: true, lowercase: true, default: '' },
   passwordHash: { type: String, required: true, select: false },
+  // sha256 of the random key the app got when sending the application: lets that phone read the status (GET /:id/status)
+  statusKeyHash: { type: String, select: false },
   cities: [{ type: String, enum: ['jeddah', 'makkah'] }],
   skills: [{ type: String, enum: ['ac', 'refrigerator', 'washing-machine', 'stove', 'general'] }],
   experienceYears: { type: Number, min: 0, max: 60, default: 0 },

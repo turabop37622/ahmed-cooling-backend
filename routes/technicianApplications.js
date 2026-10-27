@@ -4,13 +4,17 @@
 // they are with the mobile number + password they chose when applying.
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const router = express.Router();
 const User = require('../models/User');
 const TechnicianApplication = require('../models/TechnicianApplication');
 const cloudinary = require('../utils/cloudinary');
 const upload = require('../utils/multer');
-const { notifyUser } = require('../utils/notify');
+const { notifyUser, pushToTokens } = require('../utils/notify');
+const dispatchWhatsApp = require('../utils/dispatchWhatsApp');
+
+const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
 const { validateAnyPhone, normalizeAnyPhone, phoneVariants } = require('../utils/phone');
 const { normEmail, isEmail, cleanStr } = require('../utils/security');
 
@@ -152,8 +156,9 @@ router.post('/', applyLimiter, uploadFiles, async (req, res) => {
       toCloudinary(certificateFile, { folder: 'ahmedcooling/technician-ids', public_id: `certificate-${stamp}`, type: 'authenticated', format: 'jpg' }),
     ]);
 
+    const statusKey = crypto.randomBytes(24).toString('hex');
     const application = await TechnicianApplication.create({
-      ...parsed.values, about: parsed.values.about || '', phone, passwordHash: await bcrypt.hash(password, 10),
+      ...parsed.values, about: parsed.values.about || '', phone, passwordHash: await bcrypt.hash(password, 10), statusKeyHash: sha256(statusKey),
       idPhotoPublicId: idPhoto.public_id, idPhotoBackPublicId: idPhotoBack ? idPhotoBack.public_id : '',
       passportPublicId: passport.public_id, certificatePublicId: certificate.public_id,
       photoUrl: photo.secure_url, pushTokens: pushTokensFrom(body),
@@ -163,10 +168,41 @@ router.post('/', applyLimiter, uploadFiles, async (req, res) => {
       message: 'Application received. Your verification will be completed within 2 working days.',
       messageAr: 'تم استلام طلبك. سيتم التحقق منك خلال يومي عمل.',
       applicationId: String(application._id),
+      statusKey,
     });
+
+    // The applicant hears that it arrived (push on this phone + WhatsApp), the admins that there is one to review
+    pushToTokens(application.pushTokens, {
+      title: 'Application received | تم استلام طلبك',
+      message: 'Our team will check your details within 2 working days.\nسيراجع فريقنا بياناتك خلال يومي عمل.',
+      data: { kind: 'application', status: 'received' },
+    }).catch(() => {});
+    dispatchWhatsApp.applicationDecision(application, 'received').catch(() => {});
+    User.find({ role: 'admin' }).select('_id').lean().then((admins) => Promise.all(admins.map((admin) => notifyUser(admin._id, {
+      type: 'system', priority: 'high', title: 'New technician application',
+      message: `${application.fullName} applied to join as a technician. Please review the application.`,
+      data: { kind: 'application', applicationId: String(application._id) },
+    })))).catch(() => {});
   } catch (err) {
     console.error('Technician application error:', err.message);
     bad(res, 500, 'Could not send your application. Please try again.', 'تعذر إرسال طلبك. حاول مرة أخرى.');
+  }
+});
+
+// ---------- where my application stands (the phone that sent it, with the key it got back) ----------
+
+router.get('/:id/status', mineLimiter, async (req, res) => {
+  try {
+    const key = typeof req.query.key === 'string' ? req.query.key : '';
+    if (!/^[a-f\d]{24}$/i.test(req.params.id) || !/^[a-f\d]{48}$/i.test(key)) return bad(res, 404, 'Application not found', 'الطلب غير موجود');
+    const a = await TechnicianApplication.findById(req.params.id).select('+statusKeyHash status adminMessage rejectionReason reviewedAt');
+    if (!a || !a.statusKeyHash || a.statusKeyHash !== sha256(key)) return bad(res, 404, 'Application not found', 'الطلب غير موجود');
+    res.json({
+      success: true, status: a.status, adminMessage: a.adminMessage || '', rejectionReason: a.rejectionReason || '', reviewedAt: a.reviewedAt || null,
+    });
+  } catch (err) {
+    console.error('Technician application status error:', err.message);
+    bad(res, 500, 'Could not check your application. Please try again.', 'تعذر التحقق من طلبك. حاول مرة أخرى.');
   }
 });
 

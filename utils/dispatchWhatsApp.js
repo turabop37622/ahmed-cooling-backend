@@ -102,21 +102,23 @@ const technicianChangedToCustomer = (booking) => {
 
 // The applicant: the admin approved or rejected the technician application (plain text — it only lands if they messaged
 // us in the last 24 hours, otherwise the app login message explains the result).
-// decision: 'approved' | 'rejected' | 'changes' (the admin sent the application back; application.adminMessage says what to fix)
+// decision: 'received' (just sent) | 'approved' | 'rejected' | 'changes' (the admin sent the application back; application.adminMessage says what to fix)
 const applicationDecision = (application, decision) => {
   const name = application.fullName;
   const why = decision === 'rejected' ? application.rejectionReason : application.adminMessage;
   const detail = {
+    received: 'Our team will check your details within 2 working days. | سيراجع فريقنا بياناتك خلال يومي عمل.',
     approved: 'You can now log in to the technician app with your mobile number and password. | يمكنك الآن تسجيل الدخول إلى تطبيق الفنيين برقم جوالك وكلمة المرور.',
     rejected: `Reason: ${why} | السبب: ${why}`,
     changes: `${why} | Open the technician app, tap Login and update your application. | افتح تطبيق الفنيين واضغط تسجيل الدخول ثم عدّل طلبك.`,
   }[decision];
   const text = {
+    received: `Hello ${name}, we received your Ahmed Cooling technician application. Our team will check it within 2 working days and let you know here.\nمرحباً ${name}، استلمنا طلب انضمامك كفني. سيراجعه فريقنا خلال يومي عمل وسنبلغك هنا.`,
     approved: `Hello ${name}, your Ahmed Cooling technician application was approved. Log in to the technician app with your phone number and password.\nمرحباً ${name}، تمت الموافقة على طلبك. سجّل الدخول في تطبيق الفنيين برقم جوالك وكلمة المرور.`,
     rejected: `Hello ${name}, your Ahmed Cooling technician application was not approved: ${why}\nمرحباً ${name}، لم تتم الموافقة على طلبك: ${why}`,
     changes: `Hello ${name}, we need a change in your technician application: ${why}\nOpen the technician app, tap Login and update your application.\nمرحباً ${name}، نحتاج إلى تعديل في طلبك: ${why}\nافتح تطبيق الفنيين واضغط تسجيل الدخول ثم عدّل طلبك.`,
   }[decision];
-  const label = { approved: 'approved | تمت الموافقة', rejected: 'not approved | لم تتم الموافقة', changes: 'sent back for changes | أُعيد لإجراء تعديلات' }[decision];
+  const label = { received: 'received | تم الاستلام', approved: 'approved | تمت الموافقة', rejected: 'not approved | لم تتم الموافقة', changes: 'sent back for changes | أُعيد لإجراء تعديلات' }[decision];
   return send(application.phone, APPLICATION_RESULT_TEMPLATE, [name, label, detail], text);
 };
 
