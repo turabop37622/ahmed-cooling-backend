@@ -39,7 +39,7 @@ const toWaId = (phone) => String(phone || '').replace(/^\+/, '');
 const OTHER_ENGLISH = { en: 'en_US', en_US: 'en' };
 // The last template send that worked and the last one Meta refused, for the admin panel (utils/whatsappHealth.js):
 // template messages are what reach customers who have not written to us, so a refusal there is otherwise invisible.
-const templateLog = { lastOk: null, lastError: null };
+const templateLog = { lastOk: null, lastError: null, lastUndelivered: null };
 const recordTemplate = (templateName, err) => {
   if (!err) { templateLog.lastOk = { template: templateName, at: new Date() }; return; }
   const meta = err.response?.data?.error || {};
@@ -150,6 +150,15 @@ const sendLocationRequest = (to, bodyText) => post({
   },
 });
 
+// Meta accepting a message is not delivery: the webhook later reports "delivered" or "failed" (e.g. the number is not on
+// WhatsApp, or the account cannot pay for business-initiated messages). The last failure is kept for the admin panel.
+const recordDeliveryFailure = (status) => {
+  const e = (status.errors && status.errors[0]) || {};
+  templateLog.lastUndelivered = {
+    at: new Date(Number(status.timestamp) * 1000 || Date.now()), to: status.recipient_id || null, code: e.code || null,
+    message: (e.error_data && e.error_data.details) || e.message || e.title || 'Not delivered',
+  };
+};
 const getTemplateLog = () => ({ ...templateLog });
 
-module.exports = { getTemplateLog, isConfigured, probe, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, sendLocationRequest, toWaId };
+module.exports = { getTemplateLog, recordDeliveryFailure, isConfigured, probe, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, sendLocationRequest, toWaId };

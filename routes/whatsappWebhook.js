@@ -17,6 +17,7 @@ const chatbot = require('../utils/whatsappChatbot');
 const menu = require('../utils/whatsappMenu');
 const faq = require('../utils/whatsappFaq');
 const store = require('../utils/whatsappConversationStore');
+const whatsappCloud = require('../utils/whatsappCloud');
 
 // Meta signs every webhook body with the app secret (X-Hub-Signature-256: sha256=<hmac>). Without checking it, anyone
 // who knows this URL can post fake "customer" messages and drive the booking flow — creating real bookings, admin
@@ -227,6 +228,12 @@ router.post('/webhook', (req, res) => {
         for (const message of value.messages || []) {
           handleMessage(message, waId, customerName)
             .catch((err) => console.error('❌ WhatsApp webhook message handling failed:', err.message));
+        }
+        // Delivery reports for what we sent: a "failed" one is the only sign that a message never reached the customer
+        for (const status of value.statuses || []) {
+          if (status.status !== 'failed') continue;
+          console.error('❌ WhatsApp message not delivered to', status.recipient_id, JSON.stringify(status.errors || []));
+          whatsappCloud.recordDeliveryFailure(status);
         }
       }
     }

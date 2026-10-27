@@ -130,3 +130,12 @@ test('a template Meta refuses is remembered for the admin panel, with Meta\'s co
     delete require.cache[require.resolve('../utils/whatsappCloud')];
   }
 });
+
+test('a "failed" delivery report from Meta is kept for the admin panel', () => {
+  const cloud = require('../utils/whatsappCloud');
+  cloud.recordDeliveryFailure({ status: 'failed', recipient_id: '966500000001', timestamp: String(Math.floor(Date.now() / 1000)), errors: [{ code: 131026, title: 'Message undeliverable' }] });
+  const u = cloud.getTemplateLog().lastUndelivered;
+  assert.equal(u.code, 131026);
+  assert.equal(u.to, '966500000001');
+  assert.match(u.message, /undeliverable/i);
+});
