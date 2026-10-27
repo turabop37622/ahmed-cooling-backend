@@ -431,5 +431,5 @@ const startScheduler = () => {
 module.exports = {
   DEFAULT_SETTINGS, getSettings, clearSettingsCache, scheduledAt, startOfRiyadhDay,
   matchingTechnicians, notifyOpen, openBookingsFor, dispatch, acceptOffer, declineOffer, cancelByTechnician, reviewCancellation,
-  tick, startScheduler,
+  tick, startScheduler, distanceKm, hasCoords,
 };

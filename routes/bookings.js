@@ -1149,7 +1149,7 @@ router.get('/user/my-bookings', auth, async (req, res) => {
       query.status = req.query.status;
     }
     const bookings = await Booking.find(query)
-      .populate('technician', 'fullName phone')
+      .populate('technician', 'fullName phone profileImage')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -1163,7 +1163,7 @@ router.get('/user/my-bookings', auth, async (req, res) => {
 
 router.get('/:id', auth, async (req, res) => {
   try {
-    const booking = await Booking.findById(req.params.id).populate('technician', 'fullName phone').populate('user', 'fullName email phone');
+    const booking = await Booking.findById(req.params.id).populate('technician', 'fullName phone profileImage').populate('user', 'fullName email phone');
     if (!booking) return notFound(res);
     // Admins still see a deleted booking here (records); everyone else gets a 404.
     if (booking.deletedAt && req.user.role !== 'admin') return notFound(res);
@@ -1225,12 +1225,22 @@ router.get('/:id/track', auth, async (req, res) => {
     if (isGone(booking)) return notFound(res);
     if (!ownsBooking(booking, req.user) && !isAssignedTechnician(booking, req.user)) return res.status(403).json({ success: false, message: 'Access denied' });
 
+    // The technician's position is shared only while they are coming to / working at this booking, and only if the app
+    // reported it recently. No arrival time is promised; the customer sees the distance and when it was last updated.
     let location = null;
-    if (booking.technician) {
-      const tech = await Technician.findOne({ user: booking.technician });
-      if (tech?.currentLocation) location = { coordinates: tech.currentLocation.coordinates, lastUpdated: tech.currentLocation.lastUpdated };
+    let distanceKm = null;
+    if (booking.technician && ['on_the_way', 'in_progress'].includes(booking.status)) {
+      const tech = await Technician.findOne({ user: booking.technician }).select('currentLocation').lean();
+      const [lng, lat] = tech?.currentLocation?.coordinates || [];
+      const updated = tech?.currentLocation?.lastUpdated ? new Date(tech.currentLocation.lastUpdated) : null;
+      if (dispatch.hasCoords(lat, lng) && updated && Date.now() - updated.getTime() < 30 * 60 * 1000) {
+        location = { latitude: lat, longitude: lng, lastUpdated: updated };
+        const bLat = Number(booking.coordinates?.latitude);
+        const bLng = Number(booking.coordinates?.longitude);
+        if (dispatch.hasCoords(bLat, bLng)) distanceKm = Math.round(dispatch.distanceKm(lat, lng, bLat, bLng) * 10) / 10;
+      }
     }
-    res.json({ success: true, location, status: booking.status, estimatedArrival: booking.status === 'on_the_way' ? '15-20 minutes' : null });
+    res.json({ success: true, status: booking.status, location, distanceKm });
   } catch (error) {
     console.error('❌ Booking track error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
