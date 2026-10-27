@@ -5,14 +5,14 @@
 //   WHATSAPP_CUSTOMER_ASSIGNED_TEMPLATE body: 4 variables  {{1}} customer {{2}} order number {{3}} technician {{4}} technician phone
 //   WHATSAPP_ON_THE_WAY_TEMPLATE        body: 3 variables  {{1}} customer {{2}} order number {{3}} technician (name and phone)
 //   WHATSAPP_COMPLETED_TEMPLATE         body: 2 variables  {{1}} customer {{2}} order number
-// All use WHATSAPP_DISPATCH_TEMPLATE_LANG (default en_US). While a template name is not configured, a plain text message
+// All use WHATSAPP_DISPATCH_TEMPLATE_LANG (default en, Meta's code for "English"). While a template name is not configured, a plain text message
 // is tried instead (Meta delivers it only if the person messaged this number in the last 24 hours). A send never throws:
 // the app push notification (utils/notify.js) is the main channel, WhatsApp is the extra one.
 const whatsappCloud = require('./whatsappCloud');
 const { logMessage } = require('./whatsappConversationStore');
 const { normalizePhone } = require('./phone');
 
-const LANG = process.env.WHATSAPP_DISPATCH_TEMPLATE_LANG || 'en_US';
+const LANG = process.env.WHATSAPP_DISPATCH_TEMPLATE_LANG || 'en';
 const TECH_OFFER_TEMPLATE = process.env.WHATSAPP_TECH_OFFER_TEMPLATE || '';
 const CUSTOMER_ASSIGNED_TEMPLATE = process.env.WHATSAPP_CUSTOMER_ASSIGNED_TEMPLATE || '';
 const APPLICATION_RESULT_TEMPLATE = process.env.WHATSAPP_APPLICATION_RESULT_TEMPLATE || '';
