@@ -35,7 +35,7 @@ const HANDOFF_MARKER = '[[HANDOFF]]';
 const SYSTEM_PROMPT = () => {
   const lines = catalogueServices.slice(0, 40).map((s) => {
     const ar = s.nameAr ? ` / ${s.nameAr}` : '';
-    return `- ${s.name}${ar}: from SAR ${s.basePrice}, ~${s.estimatedDuration}${s.isEmergency ? ', emergency service' : ''}${s.warrantyDays ? `, ${s.warrantyDays}-day warranty` : ''}`;
+    return `- ${s.name}${ar}: from SAR ${s.basePrice}${s.isEmergency ? ', emergency service' : ''}`;
   }).join('\n');
   return `You are the WhatsApp assistant for Ahmed Cooling Workshop (ورشة أحمد للتبريد), an AC and home-appliance repair business serving Jeddah and Makkah, Saudi Arabia only.
 
@@ -51,6 +51,7 @@ Facts you can rely on:
 ${lines}
 
 Rules:
+- NEVER say how long a service takes, how soon a technician will arrive, or mention any warranty or guarantee — not even as an estimate. If asked, say our team confirms that for their specific case after booking or inspection, and offer the "Talk to our team" button.
 - Reply in the same language the customer wrote in (Arabic, English, or Roman Urdu/Hindi).
 - Keep answers short and WhatsApp-appropriate (a few sentences, no markdown headings).
 - Never invent a price, address, or policy that isn't listed above.

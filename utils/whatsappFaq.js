@@ -174,15 +174,13 @@ const findServices = (norm, limit = 5) => {
 
 // ---------- reply texts ----------
 const L = (lang, en, ar) => (lang === 'ar' ? ar : en);
-const arDuration = (d) => String(d || '').replace(/hours?/i, 'ساعات').replace(/Annual Contract/i, 'عقد سنوي').replace(/(\d)-(\d)/, '$1-$2');
 const serviceName = (s, lang) => (lang === 'ar' && s.nameAr ? s.nameAr : s.name);
 
 const serviceLine = (s, lang, detailed) => {
   const base = `${serviceName(s, lang)} — ${L(lang, `from SAR ${s.basePrice}`, `يبدأ من ${s.basePrice} ريال`)}`;
   if (!detailed) return `• ${base}`;
   const bits = [];
-  if (s.estimatedDuration) bits.push(L(lang, `about ${s.estimatedDuration}`, `المدة حوالي ${arDuration(s.estimatedDuration)}`));
-  if (s.warrantyDays) bits.push(L(lang, `${s.warrantyDays}-day warranty`, `ضمان ${s.warrantyDays} يوم`));
+  // The bot never states how long a service takes or what warranty it has.
   if (s.isPackage) bits.push(L(lang, 'visit included', 'الزيارة مشمولة'));
   return `• ${base}${bits.length ? ` (${bits.join(L(lang, ', ', '، '))})` : ''}`;
 };
@@ -205,11 +203,6 @@ const serviceReply = (services, lang) => {
   return `${lines.join('\n')}\n\n${PRICE_NOTE(lang)}`;
 };
 
-const warrantyRange = () => {
-  const days = catalogue.map((s) => s.warrantyDays).filter((d) => d && d < 365);
-  return days.length ? [Math.min(...days), Math.max(...days)] : [7, 60];
-};
-
 const REPLIES = {
   thanks: (lang) => L(lang, 'You\'re welcome! Let us know if you need anything else.', 'العفو! أخبرنا إذا احتجت أي شيء آخر.'),
   areas: (lang) => L(lang, 'We currently serve Jeddah and Makkah only.', 'نخدم حالياً مدينتي جدة ومكة فقط.'),
@@ -222,15 +215,12 @@ const REPLIES = {
   visit_fee: (lang) => L(lang,
     `A technician visit fee of SAR ${VISIT_FEE} is added to the service price (fixed-price packages already include it), and it is paid after the service too.`,
     `تُضاف رسوم زيارة الفني ${VISIT_FEE} ريال إلى سعر الخدمة (والباقات ثابتة السعر تشمل الزيارة)، وتُدفع بعد الخدمة أيضاً.`),
-  warranty: (lang) => {
-    const [min, max] = warrantyRange();
-    return L(lang,
-      `All work comes with an official certified warranty — usually ${min} to ${max} days depending on the service (the Annual Villa Care plan covers a full year).`,
-      `جميع الأعمال مشمولة بضمان رسمي معتمد — عادةً من ${min} إلى ${max} يوماً حسب الخدمة (وخطة العناية السنوية للفلل تغطي سنة كاملة).`);
-  },
+  warranty: (lang) => L(lang,
+    'Our team confirms any warranty details for your specific service. Tap "Talk to our team" below and they will help you.',
+    'يؤكد فريقنا تفاصيل الضمان لخدمتك تحديداً. اضغط «تحدث مع فريقنا» أدناه وسيساعدونك.'),
   arrival: (lang) => L(lang,
-    'A certified technician typically arrives within about 60–90 minutes. After you book, we confirm your slot and assign a technician.',
-    'يصل الفني المعتمد عادةً خلال 60–90 دقيقة تقريباً. بعد الحجز نؤكد الموعد ونعيّن فنياً.'),
+    'After you book, we confirm your slot and assign a certified technician, who contacts you before arriving.',
+    'بعد الحجز نؤكد الموعد ونعيّن فنياً معتمداً يتواصل معك قبل الوصول.'),
   how_to_book: (lang) => L(lang,
     'You can book right here in WhatsApp — tap "Book a service" below — or through our app or website.',
     'يمكنك الحجز مباشرة هنا في واتساب — اضغط «حجز خدمة» أدناه — أو عبر التطبيق أو الموقع.'),
