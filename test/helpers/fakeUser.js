@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 let counter = 0;
 const matches = (doc, filter) =>
   Object.entries(filter).every(([key, cond]) => {
+    if (key === '$or') return cond.some((alt) => matches(doc, alt));
     if (cond && typeof cond === 'object' && '$in' in cond) return cond.$in.includes(doc[key]);
     if (cond && typeof cond === 'object' && '$ne' in cond) return doc[key] !== cond.$ne;
     return String(doc[key]) === String(cond);

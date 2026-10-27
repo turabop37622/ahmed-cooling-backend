@@ -316,3 +316,39 @@ test('an account stored with a local-format number is still found by the canonic
   const login = await post('/phone/login', { phone: '+966566666666', password: 'LocalPass123' });
   assert.equal(login.status, 200);
 });
+
+const googleAs = (email, sub) => async (u) => (u.includes('tokeninfo')
+  ? { data: { aud: '506685890879-rcuen5qa0bom1f4asc89ah29k8ernt59.apps.googleusercontent.com', expires_in: '3000' } }
+  : { data: { email, email_verified: true, sub, name: 'Tech Person' } });
+
+test('a technician signs in with Google through the application email, even when it is only their staffEmail', async () => {
+  await new FakeUser({ fullName: 'Tech', phone: '+966555555555', role: 'technician', authProvider: 'phone', isVerified: true, staffEmail: 'tech@example.com', password: 'secret-pass' }).save();
+  const realGet = axios.get;
+  axios.get = googleAs('tech@example.com', 'g-t1');
+  try {
+    const res = await post('/social', { accessToken: 'token' });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.user.role, 'technician');
+    assert.equal(FakeUser.store.length, 1, 'no customer account is created');
+  } finally {
+    axios.get = realGet;
+  }
+});
+
+test('one Google email with a customer and a technician account: the app is asked to choose, then gets the chosen one', async () => {
+  await new FakeUser({ fullName: 'Cust', email: 'both@example.com', role: 'customer', authProvider: 'google', isVerified: true, googleId: 'g-b' }).save();
+  await new FakeUser({ fullName: 'Tech', phone: '+966566666666', role: 'technician', authProvider: 'phone', isVerified: true, staffEmail: 'both@example.com', password: 'secret-pass' }).save();
+  const realGet = axios.get;
+  axios.get = googleAs('both@example.com', 'g-b');
+  try {
+    const ask = await post('/social', { accessToken: 'token' });
+    assert.equal(ask.body.chooseRole, true);
+    assert.ok(!ask.body.token);
+    const tech = await post('/social', { accessToken: 'token', as: 'technician' });
+    assert.equal(tech.body.user.role, 'technician');
+    const cust = await post('/social', { accessToken: 'token', as: 'customer' });
+    assert.equal(cust.body.user.role, 'customer');
+  } finally {
+    axios.get = realGet;
+  }
+});

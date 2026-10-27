@@ -437,6 +437,27 @@ router.post('/social', async (req, res) => {
       }
     }
 
+    // A technician signs in with the Google account of their application email. If the same address is also a customer
+    // account, the app asks which one (chooseRole) and sends the answer back as `as`.
+    const as = ['customer', 'technician'].includes(req.body.as) ? req.body.as : null;
+    const technician = await User.findOne({ role: 'technician', $or: [{ email }, { staffEmail: email }] });
+    const customer = await User.findOne({ email, role: 'customer' });
+    const hasCustomer = !!customer && !isStaleUnverified(customer);
+    if (technician && as !== 'customer') {
+      if (hasCustomer && !as) {
+        return res.json({ success: false, chooseRole: true, message: 'This Google account has a customer and a technician account. Choose one.' });
+      }
+      const token = generateToken(technician);
+      return res.json({ success: true, message: 'Logged in with google', token, userId: technician._id.toString(), user: userResponse(technician) });
+    }
+    if (!technician && as === 'technician') {
+      // Not approved yet: say where the application stands instead of making a customer account
+      const TechnicianApplication = require('../models/TechnicianApplication');
+      const application = await TechnicianApplication.findOne({ email, status: { $in: ['pending', 'changes_requested', 'rejected'] } }).sort({ createdAt: -1 });
+      if (application) return res.status(403).json(applicationLoginReply(application));
+      return res.status(404).json({ success: false, message: 'No technician account uses this Google email.', messageAr: 'لا يوجد حساب فني بهذا البريد في جوجل.' });
+    }
+
     let user = await User.findOne({ email });
     // A half-finished email sign-up must not block the real owner of the address from using Google.
     if (isStaleUnverified(user)) {

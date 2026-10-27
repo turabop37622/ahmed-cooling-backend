@@ -18,6 +18,10 @@ const userSchema = new mongoose.Schema({
     match: [/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/, 'Please enter a valid email']
   },
 
+  // A technician's Google sign-in address. Usually the same as `email`, but a technician whose customer account already
+  // owns that address (one email, two accounts) keeps it only here, because `email` is unique. See routes/auth.js /social.
+  staffEmail: { type: String, lowercase: true, trim: true, index: true },
+
   password: {
     type: String,
     minlength: [6, 'Password must be at least 6 characters'],

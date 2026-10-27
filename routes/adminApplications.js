@@ -96,9 +96,13 @@ router.post('/technician-applications/:id/approve', async (req, res) => {
     if (await User.findOne({ phone: { $in: phoneVariants(a.phone) }, role: { $in: ['technician', 'admin'] } }).select('_id').lean()) {
       return res.status(409).json({ success: false, message: 'A technician or admin already uses this phone number' });
     }
-    if (a.email && await User.findOne({ email: a.email }).select('_id').lean()) {
-      return res.status(409).json({ success: false, message: 'An account with this email already exists — remove the email from the application first' });
+    // The same email may already be the applicant's customer account: the technician account then signs in with Google
+    // through staffEmail. Another technician or an admin on that address is a real conflict.
+    const emailOwner = a.email ? await User.findOne({ email: a.email }).select('role').lean() : null;
+    if (emailOwner && emailOwner.role !== 'customer') {
+      return res.status(409).json({ success: false, message: 'Another technician or admin already uses this email' });
     }
+    const emailFields = !a.email ? {} : emailOwner ? { staffEmail: a.email } : { email: a.email, staffEmail: a.email };
 
     const pickList = (value, allowed, fallback) => (Array.isArray(value) && value.length && value.every((v) => allowed.includes(v)) ? [...new Set(value)] : fallback);
     const cities = pickList(req.body && req.body.cities, ['jeddah', 'makkah'], a.cities);
@@ -106,7 +110,7 @@ router.post('/technician-applications/:id/approve', async (req, res) => {
 
     // The schema hashes `password` on save; the applicant's own bcrypt hash is written over it right after.
     const user = new User({
-      fullName: a.fullName, phone: a.phone, ...(a.email ? { email: a.email } : {}), password: crypto.randomBytes(24).toString('hex'),
+      fullName: a.fullName, phone: a.phone, ...emailFields, password: crypto.randomBytes(24).toString('hex'),
       role: 'technician', authProvider: 'phone', isVerified: true, isPhoneVerified: true, profileImage: a.photoUrl,
     });
     await user.save();
