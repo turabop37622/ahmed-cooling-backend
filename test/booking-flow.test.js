@@ -679,48 +679,34 @@ test('one active job: a technician cannot start a second job while one is on the
   assert.equal((await call('PUT', `/${IDS.booking}/status`, IDS.tech, { status: 'on_the_way' })).status, 200);
 });
 
-test('completion: 7% commission of the booking price (or more if more was collected), rounded to 2 decimals', async () => {
+test('completion: 7% commission of the booking price; an amount sent by the technician is ignored', async () => {
   const complete = async (body, over = {}, who = IDS.tech) => {
     db = makeBooking({ status: 'in_progress', technician: IDS.tech, totalAmount: 180, ...over });
     return call('PUT', `/${IDS.booking}/status`, who, { status: 'completed', ...body });
   };
-  let res = await complete({ amountCollected: 250, note: 'Gas refill' });
+  let res = await complete({ note: 'Gas refill' });
   assert.equal(res.status, 200);
-  assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 250, amount: 17.5, technicianShare: 232.5 });
-  assert.equal(db.completion.amountCollected, 250);
+  assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 180, amount: 12.6, technicianShare: 167.4 });
+  assert.equal(db.completion.amountCollected, 180);
   assert.equal(db.completion.note, 'Gas refill');
   assert.equal(db.completion.completedByRole, 'technician');
   assert.equal(String(db.completion.completedBy), IDS.tech);
   assert.ok(db.completion.completedAt instanceof Date);
 
-  res = await complete({});
-  assert.equal(res.status, 200);
-  assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 180, amount: 12.6, technicianShare: 167.4 }, 'default = totalAmount');
-
-  await complete({ amountCollected: 199.99 });
-  assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 199.99, amount: 14, technicianShare: 185.99 }, 'rounded');
-  await complete({ amountCollected: 233.33 });
-  assert.equal(db.commission.amount, 16.33);
-  assert.equal(db.commission.technicianShare, 217);
-  await complete({ amountCollected: '٢٥٠' });
-  assert.equal(db.commission.base, 250, 'Arabic-Indic digits');
-  // Reporting less than the booking price does not lower the commission (inDrive style).
-  await complete({ amountCollected: 100 });
-  assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 180, amount: 12.6, technicianShare: 87.4 });
-  assert.equal(db.completion.amountCollected, 100, 'the real amount collected is still recorded');
-  await complete({ amountCollected: 0 });
-  assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 180, amount: 12.6, technicianShare: 0 });
-  await complete({ amountCollected: 0 }, { totalAmount: 0 });
+  // An old app still sending an amount: lower, higher or junk, the booking price is used.
+  for (const sent of [100, 0, 250, -1, 'abc']) {
+    res = await complete({ amountCollected: sent });
+    assert.equal(res.status, 200, JSON.stringify(sent));
+    assert.equal(db.completion.amountCollected, 180);
+    assert.equal(db.commission.amount, 12.6);
+  }
+  await complete({}, { totalAmount: 99.99 });
+  assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 99.99, amount: 7, technicianShare: 92.99 }, 'rounded');
+  await complete({}, { totalAmount: 0 });
   assert.deepEqual({ ...db.commission }, { rate: 0.07, base: 0, amount: 0, technicianShare: 0 });
   // Accepted in offer mode at 10%: that rate stays, even if the admin changed the rate since.
   await complete({}, { commissionHold: { status: 'held', rate: 0.1, amount: 18 } });
   assert.deepEqual({ ...db.commission }, { rate: 0.1, base: 180, amount: 18, technicianShare: 162, prepaid: true });
-
-  for (const bad of [-1, 100001, 'abc', '12abc', true]) {
-    res = await complete({ amountCollected: bad });
-    assert.equal(res.status, 400, JSON.stringify(bad));
-    assert.equal(db.status, 'in_progress');
-  }
 
   // An admin completing uses the booking total.
   await complete({ amountCollected: 999 }, {}, IDS.admin);

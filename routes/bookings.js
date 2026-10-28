@@ -1321,9 +1321,9 @@ router.put('/:id/status', auth, async (req, res) => {
     const now = new Date();
     const $set = { status };
     if (status === 'completed') {
-      // Amount collected: technician may enter it (default = booking total); an admin completion uses the total.
-      const parsed = role === 'technician' ? parseAmountCollected(req.body.amountCollected, booking.totalAmount) : parseAmountCollected(undefined, booking.totalAmount);
-      if (parsed.error) return res.status(400).json({ success: false, message: parsed.error });
+      // Always the booking price (inDrive style): nobody types an amount, so the commission cannot be talked down.
+      // A price change goes through the admin editing the booking total first.
+      const parsed = parseAmountCollected(undefined, booking.totalAmount);
       $set.completion = {
         amountCollected: parsed.value,
         note: cleanStr(req.body.note, 500),
