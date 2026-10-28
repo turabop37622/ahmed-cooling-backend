@@ -1,5 +1,6 @@
-// Commission on completed bookings: the company takes `rate` (default 7%) of the amount the technician actually
-// collected; the technician keeps the rest. The rate comes from the AppSetting document and is frozen on the booking.
+// Commission on completed bookings, inDrive style: the company takes `rate` (default 7%) of the booking price the
+// technician accepted, or of the amount collected when that is higher. Reporting a lower amount collected does not
+// lower it. The rate comes from the AppSetting document and is frozen on the booking.
 const AppSetting = require('../models/AppSetting');
 
 const DEFAULT_RATE = AppSetting.DEFAULT_COMMISSION_RATE; // 0.07
@@ -46,4 +47,11 @@ const parseAmountCollected = (raw, totalAmount) => {
   return { value: round2(n) };
 };
 
-module.exports = { DEFAULT_RATE, MAX_RATE, MAX_AMOUNT_COLLECTED, round2, validRate, getCommissionRate, computeCommission, parseAmountCollected };
+// { rate, base, amount, technicianShare } for a completed job: base = the higher of the booking price and the amount
+// collected; the technician keeps what they collected minus the commission (never below 0).
+const jobCommission = (collected, totalAmount, rate) => {
+  const c = computeCommission(Math.max(round2(Math.max(0, Number(collected) || 0)), round2(Math.max(0, Number(totalAmount) || 0))), rate);
+  return { ...c, technicianShare: round2(Math.max(0, (Number(collected) || 0) - c.amount)) };
+};
+
+module.exports = { DEFAULT_RATE, MAX_RATE, MAX_AMOUNT_COLLECTED, round2, validRate, getCommissionRate, computeCommission, jobCommission, parseAmountCollected };

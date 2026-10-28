@@ -70,8 +70,9 @@ const forfeitHold = async (booking) => {
   return claimed && claimed.commissionHold ? claimed.commissionHold.amount || 0 : 0;
 };
 
-// On completion the real commission (on the amount collected) replaces the hold; the difference is paid out of / into
-// the wallet. Does nothing when no hold is outstanding for this technician.
+// On completion the final commission replaces the hold. It is never lower than the hold (it is on the booking price,
+// or more if more was collected), so the difference is only taken from the wallet — except when an admin lowered the
+// booking price after the hold. Does nothing when no hold is outstanding for this technician.
 const settleOnCompletion = async (booking) => {
   const hold = booking.commissionHold;
   if (!hold || hold.status !== 'held' || !booking.commission || booking.commission.amount === undefined) return 0;
@@ -85,7 +86,7 @@ const settleOnCompletion = async (booking) => {
   if (diff !== 0) {
     await record({
       technician: hold.technician, type: 'adjust', amount: diff, booking: booking._id,
-      note: `Commission adjusted to the amount collected on #${booking.orderNumber || booking._id}`,
+      note: `Commission adjusted to the final amount on #${booking.orderNumber || booking._id}`,
     });
   }
   return diff;

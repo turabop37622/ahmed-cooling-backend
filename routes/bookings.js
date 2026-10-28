@@ -14,7 +14,7 @@ const autoAssign = require('../utils/autoAssign');
 const dispatch = require('../utils/dispatch');
 const whatsappCloud = require('../utils/whatsappCloud');
 const wallet = require('../utils/wallet');
-const { getCommissionRate, computeCommission, parseAmountCollected } = require('../utils/commission');
+const { getCommissionRate, jobCommission, parseAmountCollected } = require('../utils/commission');
 // Shared with the website. Regular services are priced from the DATABASE (the source of truth); this file only adds
 // the fixed-price packages (pkg_*, technician visit fee included) and maps the old numeric ids '1'...'9' to the
 // database service that replaced them.
@@ -1331,11 +1331,13 @@ router.put('/:id/status', auth, async (req, res) => {
         completedBy: req.user.id,
         completedByRole: role,
       };
-      // Commission only when a technician did the job; the current rate is frozen on the booking.
+      // Commission only when a technician did the job: on the booking price (or more, if more was collected), at the
+      // rate taken when they accepted it, else the current rate, frozen on the booking.
       if (booking.technician) {
-        $set.commission = computeCommission(parsed.value, await getCommissionRate());
+        const held = booking.commissionHold && booking.commissionHold.status === 'held' ? booking.commissionHold : null;
+        $set.commission = jobCommission(parsed.value, booking.totalAmount, held && held.rate !== undefined ? held.rate : await getCommissionRate());
         // Taken from the technician's wallet when they picked the job up (utils/wallet.js), not owed afterwards.
-        if (booking.commissionHold && booking.commissionHold.status === 'held') $set.commission.prepaid = true;
+        if (held) $set.commission.prepaid = true;
       }
     }
     let note = notes || `Updated by ${role}`;
