@@ -43,7 +43,7 @@ const scopeSort = (scope) => (scope === 'completed'
   ? { 'completion.completedAt': -1, updatedAt: -1, _id: -1 }
   : { date: 1, assignedAt: 1, createdAt: 1, _id: 1 });
 
-const JOB_FIELDS = 'orderNumber bookingId status date time service serviceDetails customerName phone address city coordinates comments problemDescription totalAmount visitCharges currency priority assignedAt assignedBy completion commission technician';
+const JOB_FIELDS = 'orderNumber bookingId status date time service serviceDetails customerName phone address city coordinates comments problemDescription totalAmount visitCharges currency priority assignedAt assignedBy completion commission commissionHold technician';
 
 // Customer details are only ever returned for the caller's own bookings (every query is scoped to them).
 const shapeJob = (b, { history = false } = {}) => {
@@ -75,6 +75,9 @@ const shapeJob = (b, { history = false } = {}) => {
     assignedAt: b.assignedAt || null,
     completion: b.completion && b.completion.completedAt ? b.completion : null,
     commission: b.commission && b.commission.rate !== undefined && b.commission.rate !== null ? b.commission : null,
+    // Commission already taken from the wallet when the technician accepted the job (offer mode).
+    commissionHeld: b.commissionHold && b.commissionHold.status === 'held'
+      ? { amount: b.commissionHold.amount || 0, rate: b.commissionHold.rate } : null,
   };
   if (history) {
     job.statusHistory = (b.statusHistory || []).map((h) => ({ status: h.status, timestamp: h.timestamp, actorRole: h.actorRole || null }));
