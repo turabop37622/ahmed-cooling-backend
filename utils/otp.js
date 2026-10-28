@@ -4,6 +4,9 @@ const { hashOtp, safeEqual } = require('./security');
 const OTP_TTL_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
 const RESEND_COOLDOWN_MS = 60 * 1000;
+// Per account per day (UTC), whatever IP asks: 10 codes x 5 guesses keeps guessing a 6-digit code hopeless.
+const MAX_CODES_PER_DAY = 10;
+const today = () => new Date().toISOString().slice(0, 10);
 
 // Purposes keep a signup code from being reused as a password-reset code and vice versa.
 const PURPOSE_VERIFY = 'verify';
@@ -13,6 +16,7 @@ const saveQuiet = (user) => user.save({ validateBeforeSave: false });
 
 // True when enough time has passed since the last code was issued.
 const canIssueOtp = (user) => {
+  if (user.otpIssuedDay === today() && (user.otpIssuedCount || 0) >= MAX_CODES_PER_DAY) return false;
   if (!user.otp || !user.otpExpires) return true;
   const issuedAt = new Date(user.otpExpires).getTime() - OTP_TTL_MS;
   return Date.now() - issuedAt >= RESEND_COOLDOWN_MS;
@@ -25,6 +29,8 @@ const issueOtp = async (user, purpose) => {
   user.otpExpires = new Date(Date.now() + OTP_TTL_MS);
   user.otpPurpose = purpose;
   user.otpAttempts = 0;
+  user.otpIssuedCount = user.otpIssuedDay === today() ? (user.otpIssuedCount || 0) + 1 : 1;
+  user.otpIssuedDay = today();
   await saveQuiet(user);
   return otp;
 };
@@ -73,6 +79,6 @@ const checkOtp = async (user, code, purpose) => {
 };
 
 module.exports = {
-  OTP_TTL_MS, MAX_ATTEMPTS, RESEND_COOLDOWN_MS, PURPOSE_VERIFY, PURPOSE_RESET,
+  OTP_TTL_MS, MAX_ATTEMPTS, RESEND_COOLDOWN_MS, MAX_CODES_PER_DAY, PURPOSE_VERIFY, PURPOSE_RESET,
   canIssueOtp, issueOtp, clearOtp, checkOtp, saveQuiet,
 };

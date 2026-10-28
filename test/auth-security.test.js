@@ -352,3 +352,17 @@ test('one Google email with a customer and a technician account: the app is aske
     axios.get = realGet;
   }
 });
+
+test('one account gets at most 10 codes a day, whichever IP asks', async () => {
+  const otp = require('../utils/otp');
+  const user = { save: async () => {} };
+  for (let i = 0; i < otp.MAX_CODES_PER_DAY; i += 1) {
+    user.otp = undefined; user.otpExpires = undefined; // skip the 60 s cooldown
+    assert.equal(otp.canIssueOtp(user), true, `code ${i + 1}`);
+    await otp.issueOtp(user, otp.PURPOSE_RESET);
+  }
+  user.otp = undefined; user.otpExpires = undefined;
+  assert.equal(otp.canIssueOtp(user), false);
+  user.otpIssuedDay = '2000-01-01'; // a new day starts a new count
+  assert.equal(otp.canIssueOtp(user), true);
+});

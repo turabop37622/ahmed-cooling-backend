@@ -142,7 +142,7 @@ router.post('/', applyLimiter, uploadFiles, async (req, res) => {
       return bad(res, 409, 'An application with this number is already under review.', 'يوجد طلب بهذا الرقم قيد المراجعة بالفعل.');
     }
 
-    const stamp = Date.now();
+    const stamp = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`; // two applications in the same ms must not overwrite each other's documents
     const [photo, idPhoto, idPhotoBack, passport, certificate] = await Promise.all([
       toCloudinary(photoFile, {
         folder: 'ahmedcooling/technician-applications', public_id: `photo-${stamp}`, format: 'jpg',
@@ -253,7 +253,7 @@ router.put('/mine', mineLimiter, uploadFiles, async (req, res) => {
     const parsed = parseFields(body, { partial: true });
     if (parsed.error) return bad(res, 400, parsed.error[0], parsed.error[1]);
 
-    const stamp = Date.now();
+    const stamp = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`; // two applications in the same ms must not overwrite each other's documents
     const oldAssets = [];
     const set = { ...parsed.values, status: 'pending', resubmittedAt: new Date() };
 

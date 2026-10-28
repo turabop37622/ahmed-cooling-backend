@@ -76,6 +76,7 @@ const start = () => {
   console.log('✅ WhatsApp health monitor started (checks Meta access every 10 minutes).');
 };
 
-const getState = () => ({ ...state, templates: whatsappCloud.getTemplateLog() });
+// signatureCheck: false while WHATSAPP_APP_SECRET is missing, i.e. anyone who knows the webhook URL can post fake messages.
+const getState = () => ({ ...state, templates: whatsappCloud.getTemplateLog(), signatureCheck: !!process.env.WHATSAPP_APP_SECRET });
 
 module.exports = { start, check, getState };
