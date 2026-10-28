@@ -163,3 +163,26 @@ test('an Arabic salaam gets the Arabic menu straight away instead of the languag
     delete require.cache[require.resolve('../utils/whatsappMenu')];
   }
 });
+
+test('a phone number is proven only by a WhatsApp message from that number with the right, unexpired code', async () => {
+  const User = require('../models/User');
+  const phoneVerify = require('../utils/phoneVerify');
+  const saved = User.find;
+  const user = { phone: '+966512345678', save: async () => {} };
+  try {
+    assert.equal(phoneVerify.isPhoneProven({ authProvider: 'local', email: 'a@b.c', password: 'x' }), false);
+    assert.equal(phoneVerify.isPhoneProven({ authProvider: 'phone' }), true, 'created by the WhatsApp bot');
+    assert.equal(phoneVerify.isPhoneProven({ authProvider: 'phone', password: 'x' }), false, 'app phone sign-up is not proof');
+    const code = await phoneVerify.startFor(user);
+    User.find = (q) => ({ select: async () => (q.phone.$in.includes(user.phone) && user.phoneVerifyExpires > q.phoneVerifyExpires.$gt ? [user] : []) });
+    assert.deepEqual(await phoneVerify.handleIncoming('+966512345678', 'hello'), { handled: false });
+    assert.equal((await phoneVerify.handleIncoming('+966500000000', `VERIFY ${code}`)).ok, false, 'another number');
+    assert.equal((await phoneVerify.handleIncoming('+966512345678', 'VERIFY 000000')).ok, code === '000000');
+    const arabicDigits = code.replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[d]);
+    assert.equal((await phoneVerify.handleIncoming('+966512345678', `تحقق ${arabicDigits}`)).ok, true);
+    assert.ok(user.phoneProvenAt instanceof Date);
+    assert.equal(phoneVerify.isPhoneProven(user), true);
+  } finally {
+    User.find = saved;
+  }
+});

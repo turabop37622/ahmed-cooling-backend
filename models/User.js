@@ -72,6 +72,10 @@ const userSchema = new mongoose.Schema({
   otpExpires: { type: Date },
   otpPurpose: { type: String, enum: ['verify', 'reset'] },
   otpAttempts: { type: Number, default: 0 },
+  // The phone number was proved by a WhatsApp message sent from it (utils/phoneVerify.js). Cleared when the number changes.
+  phoneProvenAt: { type: Date },
+  phoneVerifyCode: { type: String, select: false },
+  phoneVerifyExpires: { type: Date },
   otpIssuedDay: { type: String },   // YYYY-MM-DD (UTC) of the codes counted in otpIssuedCount
   otpIssuedCount: { type: Number, default: 0 },
   // Tokens issued before this moment are rejected (set whenever the password changes)
@@ -145,6 +149,8 @@ userSchema.methods.toJSON = function () {
   delete obj.otpExpires;
   delete obj.otpPurpose;
   delete obj.otpAttempts;
+  delete obj.phoneVerifyCode;
+  delete obj.phoneVerifyExpires;
   delete obj.otpIssuedDay;
   delete obj.otpIssuedCount;
   delete obj.pushTokens;

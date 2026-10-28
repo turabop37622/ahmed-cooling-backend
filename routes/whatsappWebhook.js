@@ -18,6 +18,7 @@ const menu = require('../utils/whatsappMenu');
 const faq = require('../utils/whatsappFaq');
 const store = require('../utils/whatsappConversationStore');
 const whatsappCloud = require('../utils/whatsappCloud');
+const phoneVerify = require('../utils/phoneVerify');
 
 // Meta signs every webhook body with the app secret (X-Hub-Signature-256: sha256=<hmac>). Without checking it, anyone
 // who knows this URL can post fake "customer" messages and drive the booking flow — creating real bookings, admin
@@ -91,6 +92,19 @@ const handleMessage = async (message, waId, customerName) => {
     messageType: (payload || id) ? 'button' : 'text',
     customerName,
   });
+
+  // "VERIFY 123456" sent from the app: proves this number belongs to the app account that asked for the code.
+  if (isText) {
+    const proof = await phoneVerify.handleIncoming(phone, text);
+    if (proof.handled) {
+      const reply = proof.ok
+        ? '✅ Your phone number is verified. You can go back to the Ahmed Cooling app.\n✅ تم توثيق رقم جوالك. يمكنك العودة إلى تطبيق أحمد للتبريد.'
+        : '⚠️ This code is not valid for this number, or it has expired. Please request a new code in the app.\n⚠️ هذا الرمز غير صالح لهذا الرقم أو انتهت صلاحيته. اطلب رمزاً جديداً من التطبيق.';
+      try { await whatsappCloud.sendTextMessage(phone, reply); } catch { /* the app still shows the result */ }
+      await store.logMessage(phone, 'out', reply, { messageType: 'text', sentBy: 'bot' });
+      return;
+    }
+  }
 
   if (payload && await bookingBot.handleBookingButton(phone, payload)) return;
   if (isText && await bookingBot.handleBookingReasonText(phone, text)) return;

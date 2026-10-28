@@ -5,6 +5,11 @@ const User = require('../models/User');
 const Booking = require('../models/Booking');
 const { validatePhone, normalizePhone, phoneVariants } = require('../utils/phone');
 const { cleanStr, isValidPassword, PASSWORD_MIN, PASSWORD_MAX } = require('../utils/security');
+const phoneVerify = require('../utils/phoneVerify');
+const { getBusinessNumber } = require('../utils/whatsappCloud');
+const rateLimit = require('express-rate-limit');
+// A new WhatsApp code at most 10 times an hour per connection.
+const verifyLimiter = rateLimit({ windowMs: 60 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many attempts. Please try again later.' } });
 
 const serverError = (res) => res.status(500).json({ success: false, message: 'Server error' });
 const LANGUAGES = ['en', 'ar'];
@@ -15,7 +20,7 @@ router.get('/profile', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('-password');
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    res.json({ success: true, user });
+    res.json({ success: true, user: { ...user.toJSON(), phoneProven: phoneVerify.isPhoneProven(user) } });
   } catch (error) {
     console.error('Get profile error:', error);
     serverError(res);
@@ -61,6 +66,10 @@ router.put('/profile', auth, async (req, res) => {
         const taken = await User.findOne({ phone: { $in: phoneVariants(phone) }, _id: { $ne: user._id } });
         if (taken) return res.status(409).json({ success: false, message: 'This phone number is already registered' });
         user.phone = normalized;
+        // A new number has to be proved again before WhatsApp bookings attach to this account.
+        user.phoneProvenAt = undefined;
+        user.phoneVerifyCode = undefined;
+        user.phoneVerifyExpires = undefined;
       }
     }
 
@@ -80,11 +89,40 @@ router.put('/profile', auth, async (req, res) => {
         role: user.role,
         language: user.language,
         settings: user.settings,
+        phoneProven: phoneVerify.isPhoneProven(user),
       },
     });
   } catch (error) {
     if (error?.code === 11000) return res.status(409).json({ success: false, message: 'This phone number is already registered' });
     console.error('Update profile error:', error);
+    serverError(res);
+  }
+});
+
+// Phone proof over WhatsApp: a code the customer sends from their own WhatsApp (see utils/phoneVerify.js).
+router.post('/phone/verify-start', auth, verifyLimiter, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (!user.phone) return res.status(400).json({ success: false, message: 'Add your phone number first' });
+    if (phoneVerify.isPhoneProven(user)) return res.json({ success: true, alreadyVerified: true });
+    const code = await phoneVerify.startFor(user);
+    res.json({
+      success: true, code, phone: user.phone, expiresInMinutes: phoneVerify.CODE_TTL_MS / 60000,
+      whatsappNumber: getBusinessNumber(),
+    });
+  } catch (error) {
+    console.error('Phone verify start error:', error);
+    serverError(res);
+  }
+});
+
+router.get('/phone/verify-status', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    res.json({ success: true, verified: phoneVerify.isPhoneProven(user), phone: user.phone || null });
+  } catch (error) {
     serverError(res);
   }
 });

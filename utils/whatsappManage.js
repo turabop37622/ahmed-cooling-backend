@@ -36,7 +36,9 @@ const ownBooking = (phone, id) => {
 const run = async (handler, booking, body) => {
   const out = { status: 200, body: null };
   const res = { status(code) { out.status = code; return res; }, json(payload) { out.body = payload; return res; } };
-  await handler({ user: { id: String(booking.user), role: 'customer' }, body }, res, booking);
+  // A phone-only booking (no proven app account) is owned by this WhatsApp number, which Meta has verified.
+  const user = booking.user ? { id: String(booking.user), role: 'customer' } : { id: null, role: 'customer', viaPhone: true };
+  await handler({ user, body }, res, booking);
   return out;
 };
 
@@ -90,7 +92,6 @@ const handleTap = async (phone, id, isAr) => {
     return true;
   }
   if (m[1] === 'mby') {
-    if (!booking.user) { await gone(phone, isAr); return true; }
     const out = await run(bookingsRouter.cancelForOwner, booking, { reason: 'Cancelled by customer on WhatsApp' });
     if (out.body && out.body.success) {
       await sayButtons(phone, L(isAr, `Your booking #${booking.orderNumber} has been cancelled.`, `تم إلغاء حجزك #${booking.orderNumber}.`),
@@ -106,7 +107,7 @@ const handleTap = async (phone, id, isAr) => {
 // The new date and time are chosen: apply them. Returns true when the booking was changed.
 const finishReschedule = async (phone, draft, isAr) => {
   const booking = await ownBooking(phone, draft.rescheduleId);
-  if (!booking || !booking.user) { await gone(phone, isAr); return true; }
+  if (!booking) { await gone(phone, isAr); return true; }
   const out = await run(bookingsRouter.rescheduleForOwner, booking, { date: draft.date, time: draft.time });
   if (out.body && out.body.success) {
     await sayButtons(phone, L(isAr,

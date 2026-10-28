@@ -1,4 +1,5 @@
 const express = require('express');
+const { isPhoneProven } = require('../utils/phoneVerify');
 const router = express.Router();
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
@@ -80,7 +81,10 @@ const VISIT_CHARGE = (() => {
 const SUPPORT_PHONE = process.env.SUPPORT_PHONE || '+966 54 448 3745';
 // Email subjects are plain text (not HTML), so they use the raw values — just without line breaks.
 const subjectLine = (text) => String(text).replace(/[\r\n]+/g, ' ').slice(0, 200);
-const ownsBooking = (booking, user) => user.role === 'admin' || (booking.user && booking.user.toString() === String(user.id));
+// viaPhone: set only by utils/whatsappManage.js for a phone-only booking whose WhatsApp number sent the request
+// (the auth middleware never sets it).
+const ownsBooking = (booking, user) => user.role === 'admin' || (booking.user && booking.user.toString() === String(user.id))
+  || (user.viaPhone === true && !booking.user);
 const isAssignedTechnician = (booking, user) => user.role === 'technician' && !!booking.technician && String(booking.technician._id || booking.technician) === String(user.id);
 // Optional header that makes a create request safe to retry (same user + same key = same booking).
 const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{8,100}$/;
@@ -1042,14 +1046,19 @@ const createBookingForPhone = async ({ customerName, phone, serviceRecord, date,
   const normalizedPhone = normalizePhone(phone);
   const packageRecord = CATALOGUE_PACKAGES.find((item) => item._id === String(serviceRecord._id)) || null;
 
-  let user = await User.findOne({ phone: normalizedPhone, role: 'customer' });
-  if (!user) {
+  // Only an account that has PROVED this number gets the booking; a number someone merely typed on their profile does
+  // not (otherwise anyone could collect a stranger's WhatsApp bookings). Then the booking stays a phone-only booking,
+  // which the customer still sees and manages from this WhatsApp chat.
+  const existing = await User.findOne({ phone: { $in: phoneVariants(normalizedPhone) }, role: 'customer' });
+  let user = existing && isPhoneProven(existing) ? existing : null;
+  if (!existing) {
     user = await User.create({
       fullName: customerName || 'WhatsApp Customer',
       phone: normalizedPhone,
       role: 'customer',
       authProvider: 'phone',
       isPhoneVerified: true, // Meta already verifies WhatsApp ownership of this number
+      phoneProvenAt: new Date(),
       isVerified: true,
       language: language === 'ar' ? 'ar' : 'en',
     });
@@ -1065,10 +1074,10 @@ const createBookingForPhone = async ({ customerName, phone, serviceRecord, date,
 
   const booking = await Booking.create({
     bookingId, orderNumber,
-    user: user._id,
-    customerName: customerName || user.fullName,
+    user: user ? user._id : undefined,
+    customerName: customerName || (user && user.fullName) || 'WhatsApp Customer',
     phone: normalizedPhone,
-    email: user.email || '',
+    email: (user && user.email) || '',
     service: { id: serviceRecord._id, name: serviceRecord.name, name_ar: serviceRecord.nameAr, icon: serviceRecord.icon, basePrice: servicePrice, category: serviceRecord.category },
     date, time,
     address,

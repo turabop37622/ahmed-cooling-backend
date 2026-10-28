@@ -122,14 +122,19 @@ const sendListMessage = (to, bodyText, buttonText, sections) => post({
 // Cheap read-only call that tells us whether Meta currently accepts our token (no message is sent).
 // ok: true = accepted; false = Meta answered with an error (blocked/expired/revoked — `message` says which);
 // null = couldn't tell (not configured, or a network problem on our side).
+// The bot's own number (digits only), learned from Meta by probe(); WHATSAPP_BUSINESS_NUMBER can set it explicitly.
+let businessNumber = (process.env.WHATSAPP_BUSINESS_NUMBER || '').replace(/\D/g, '') || null;
+const getBusinessNumber = () => businessNumber;
+
 const probe = async () => {
   if (!isConfigured()) return { ok: null, message: 'WhatsApp Cloud API is not configured' };
   try {
-    await axios.get(`https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}`, {
-      params: { fields: 'id' },
+    const { data } = await axios.get(`https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}`, {
+      params: { fields: 'id,display_phone_number' },
       headers: { Authorization: `Bearer ${ACCESS_TOKEN}` },
       timeout: 15000,
     });
+    if (data && data.display_phone_number) businessNumber = String(data.display_phone_number).replace(/\D/g, '');
     return { ok: true };
   } catch (err) {
     const metaError = err.response?.data?.error;
@@ -161,4 +166,5 @@ const recordDeliveryFailure = (status) => {
 };
 const getTemplateLog = () => ({ ...templateLog });
 
-module.exports = { getTemplateLog, recordDeliveryFailure, isConfigured, probe, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, sendLocationRequest, toWaId };
+module.exports = {
+  getBusinessNumber, getTemplateLog, recordDeliveryFailure, isConfigured, probe, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, sendLocationRequest, toWaId };
