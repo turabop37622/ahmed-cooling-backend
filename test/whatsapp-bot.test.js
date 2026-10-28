@@ -139,3 +139,27 @@ test('a "failed" delivery report from Meta is kept for the admin panel', () => {
   assert.equal(u.to, '966500000001');
   assert.match(u.message, /undeliverable/i);
 });
+
+test('an Arabic salaam gets the Arabic menu straight away instead of the language question', async () => {
+  const cloud = require('../utils/whatsappCloud');
+  const store = require('../utils/whatsappConversationStore');
+  const saved = { list: cloud.sendListMessage, buttons: cloud.sendButtonsMessage, log: store.logMessage, lang: store.setLanguage };
+  const sent = []; let language = null;
+  cloud.sendListMessage = async (to, body) => { sent.push({ kind: 'list', body }); };
+  cloud.sendButtonsMessage = async (to, body) => { sent.push({ kind: 'buttons', body }); };
+  store.logMessage = async () => {};
+  store.setLanguage = async (phone, lang) => { language = lang; };
+  try {
+    delete require.cache[require.resolve('../utils/whatsappMenu')];
+    const menu = require('../utils/whatsappMenu');
+    const conversation = {};
+    assert.equal(await menu.handle('966546904306', 'السلام عليكم ورحمة الله وبركاته', conversation), true);
+    assert.equal(language, 'ar');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].kind, 'list');
+    assert.match(sent[0].body, /وعليكم السلام/);
+  } finally {
+    cloud.sendListMessage = saved.list; cloud.sendButtonsMessage = saved.buttons; store.logMessage = saved.log; store.setLanguage = saved.lang;
+    delete require.cache[require.resolve('../utils/whatsappMenu')];
+  }
+});

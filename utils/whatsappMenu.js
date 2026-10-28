@@ -1,7 +1,7 @@
 // The WhatsApp "front door": everything a customer sees before (and around) a booking, built from tappable
 // buttons so they type as little as possible.
 //
-//   first message -> bilingual welcome + [English] [العربية] buttons
+//   first message -> bilingual welcome + [English] [العربية] buttons (written in Arabic -> straight to the Arabic menu)
 //   language chosen -> main menu (a native list: book, services & prices, booking status, areas, contact, a human)
 //   a question typed in free text -> an instant canned answer (utils/whatsappFaq.js) with follow-up buttons,
 //                                    or, for a booking request, the step-by-step flow (utils/whatsappBookingFlow.js)
@@ -153,6 +153,18 @@ const handle = async (phone, input, conversation) => {
     }
     await sendMainMenu(phone, lang, L(lang, 'Great — we\'ll continue in English.', 'تمام — سنكمل باللغة العربية.'));
     return true;
+  }
+
+  // Written in Arabic: no need to ask — welcome them in Arabic straight away (an Arabic hello opens the Arabic menu).
+  const arabicHello = !input.startsWith('menu_') && detectLang(input) === 'ar' && faq.isGreeting(faq.normalize(input));
+  if (arabicHello || (!conversation?.language && !conversation?.languagePromptedAt && detectLang(input) === 'ar')) {
+    await setLanguage(phone, 'ar');
+    if (conversation) conversation.language = 'ar';
+    if (arabicHello) {
+      const hello = /سلام/.test(input) ? 'وعليكم السلام ورحمة الله وبركاته 👋' : 'أهلاً وسهلاً 👋';
+      await sendMainMenu(phone, 'ar', `${hello}\nمرحباً بكم في ورشة أحمد للتبريد!`);
+      return true;
+    }
   }
 
   let lang = conversation?.language;
