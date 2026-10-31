@@ -9,6 +9,29 @@ const ACCESS_TOKEN = process.env.WHATSAPP_CLOUD_API_TOKEN;
 
 const isConfigured = () => !!(PHONE_NUMBER_ID && ACCESS_TOKEN);
 
+// Meta's id of each message just sent, per recipient, until the inbox log line for it claims it
+// (utils/whatsappConversationStore.js logMessage runs right after every send). Lets the webhook's delivery report
+// find that log line without every caller passing the id along. Ids left unclaimed for a minute are dropped.
+const CLAIM_MS = 60 * 1000;
+const recentSends = new Map(); // digits-only number -> [{ id, at }]
+const digits = (phone) => String(phone || '').replace(/\D/g, '');
+const rememberSent = (to, id) => {
+  if (!id) return;
+  const key = digits(to);
+  const now = Date.now();
+  const list = (recentSends.get(key) || []).filter((x) => now - x.at < CLAIM_MS);
+  list.push({ id, at: now });
+  recentSends.set(key, list);
+};
+const claimSentId = (phone) => {
+  const key = digits(phone);
+  const now = Date.now();
+  const list = (recentSends.get(key) || []).filter((x) => now - x.at < CLAIM_MS);
+  const first = list.shift();
+  if (list.length) recentSends.set(key, list); else recentSends.delete(key);
+  return first ? first.id : null;
+};
+
 const graphUrl = () => `https://graph.facebook.com/${API_VERSION}/${PHONE_NUMBER_ID}/messages`;
 
 const post = async (payload) => {
@@ -21,6 +44,7 @@ const post = async (payload) => {
       headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
       timeout: 15000,
     });
+    rememberSent(payload.to, data && data.messages && data.messages[0] && data.messages[0].id);
     return data;
   } catch (err) {
     console.error('❌ WhatsApp Cloud API send failed:', err.response?.data || err.message);
@@ -167,4 +191,4 @@ const recordDeliveryFailure = (status) => {
 const getTemplateLog = () => ({ ...templateLog });
 
 module.exports = {
-  getBusinessNumber, getTemplateLog, recordDeliveryFailure, isConfigured, probe, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, sendLocationRequest, toWaId };
+  claimSentId, rememberSent, getBusinessNumber, getTemplateLog, recordDeliveryFailure, isConfigured, probe, sendTemplateMessage, sendTextMessage, sendButtonsMessage, sendListMessage, sendLocationRequest, toWaId };

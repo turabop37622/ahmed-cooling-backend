@@ -12,8 +12,15 @@ const whatsAppMessageSchema = new mongoose.Schema({
   // Who produced an outbound message: 'bot' (automated) or an admin User id. Unset for inbound messages.
   sentBy: { type: String, enum: ['bot', 'admin'] },
   adminUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  // Outbound only: Meta's message id, and what Meta later reported for it on the webhook. 'accepted' = Meta took it
+  // but has not reported yet; 'failed' carries Meta's reason (e.g. number not on WhatsApp, account cannot pay).
+  waMessageId: { type: String },
+  delivery: { type: String, enum: ['accepted', 'sent', 'delivered', 'read', 'failed'] },
+  deliveryAt: { type: Date },
+  deliveryError: { code: Number, message: String },
 }, { timestamps: true });
 
 whatsAppMessageSchema.index({ phone: 1, createdAt: 1 });
+whatsAppMessageSchema.index({ waMessageId: 1 }, { sparse: true });
 
 module.exports = mongoose.model('WhatsAppMessage', whatsAppMessageSchema);

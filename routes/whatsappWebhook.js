@@ -243,11 +243,14 @@ router.post('/webhook', (req, res) => {
           handleMessage(message, waId, customerName)
             .catch((err) => console.error('❌ WhatsApp webhook message handling failed:', err.message));
         }
-        // Delivery reports for what we sent: a "failed" one is the only sign that a message never reached the customer
+        // Delivery reports for what we sent (sent / delivered / read / failed), saved on the inbox line of that message.
+        // A "failed" one is the only sign that a message never reached the customer.
         for (const status of value.statuses || []) {
-          if (status.status !== 'failed') continue;
-          console.error('❌ WhatsApp message not delivered to', status.recipient_id, JSON.stringify(status.errors || []));
-          whatsappCloud.recordDeliveryFailure(status);
+          if (status.status === 'failed') {
+            console.error('❌ WhatsApp message not delivered to', status.recipient_id, JSON.stringify(status.errors || []));
+            whatsappCloud.recordDeliveryFailure(status);
+          }
+          store.recordDelivery(status).catch((err) => console.error('❌ WhatsApp delivery status save failed:', err.message));
         }
       }
     }
