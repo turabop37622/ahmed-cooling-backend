@@ -36,7 +36,9 @@ const configuredDelay = process.env.WHATSAPP_BOOKING_CONFIRM_DELAY_SEC;
 const DELAY_SEC = configuredDelay && Number(configuredDelay) >= 0 ? Number(configuredDelay) : 5;
 const TICK_MS = 5 * 1000;
 const minutesEnv = (name, fallback) => (Number(process.env[name]) > 0 ? Number(process.env[name]) : fallback);
-const REMINDER_MIN = minutesEnv('WHATSAPP_BOOKING_REMINDER_MIN', 60);
+// No answer: the same message again 2 hours and 12 hours after the first one.
+const REMINDER_MIN = minutesEnv('WHATSAPP_BOOKING_REMINDER_MIN', 120);
+const SECOND_REMINDER_MIN = minutesEnv('WHATSAPP_BOOKING_SECOND_REMINDER_MIN', 720);
 const UNCONFIRMED_ALERT_MIN = minutesEnv('WHATSAPP_BOOKING_UNCONFIRMED_ALERT_MIN', 180);
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -186,8 +188,9 @@ const tick = async () => {
   }
 };
 
-// Bookings nobody has answered: one more nudge after REMINDER_MIN, and the admin is told after UNCONFIRMED_ALERT_MIN so
-// the booking is not left pending in silence. Each is claimed atomically, like the first message.
+// Bookings nobody has answered: a nudge after REMINDER_MIN and another after SECOND_REMINDER_MIN (both counted from
+// the first message), and the admin is told after UNCONFIRMED_ALERT_MIN so the booking is not left pending in silence.
+// Each is claimed atomically, like the first message.
 const unanswered = (extra) => ({
   status: 'pending', deletedAt: null,
   'whatsappBot.confirmationSentAt': { $exists: true },
@@ -204,6 +207,18 @@ const chaseUnanswered = async () => {
     const claimed = await Booking.findOneAndUpdate(
       { _id: booking._id, ...unanswered({ 'whatsappBot.reminderSentAt': { $exists: false } }) },
       { $set: { 'whatsappBot.reminderSentAt': new Date() } }, { new: true }
+    );
+    if (claimed) await sendConfirmationRequest(claimed, { reminder: true });
+  }
+  const toRemindAgain = await Booking.find(unanswered({
+    'whatsappBot.reminderSentAt': { $exists: true },
+    'whatsappBot.secondReminderSentAt': { $exists: false },
+    'whatsappBot.confirmationSentAt': { $lte: new Date(now - SECOND_REMINDER_MIN * 60000) },
+  })).limit(25);
+  for (const booking of toRemindAgain) {
+    const claimed = await Booking.findOneAndUpdate(
+      { _id: booking._id, ...unanswered({ 'whatsappBot.secondReminderSentAt': { $exists: false } }) },
+      { $set: { 'whatsappBot.secondReminderSentAt': new Date() } }, { new: true }
     );
     if (claimed) await sendConfirmationRequest(claimed, { reminder: true });
   }
@@ -374,4 +389,4 @@ const handleAddressFixText = async (phone, text) => {
   return true;
 };
 
-module.exports = { startScheduler, tick, handleBookingButton, handleBookingReasonText, handleAddressFixText, handleTypedReply };
+module.exports = { startScheduler, tick, chaseUnanswered, handleBookingButton, handleBookingReasonText, handleAddressFixText, handleTypedReply };

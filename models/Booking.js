@@ -278,8 +278,10 @@
       // changes `status` itself; an admin still confirms/cancels the booking from the admin panel as usual.
       whatsappBot: {
         confirmationSentAt: { type: Date },
-        // The customer never answered: we nudge once (reminderSentAt) and later tell the admin (unconfirmedAlertedAt).
+        // The customer never answered: we nudge twice (reminderSentAt, secondReminderSentAt) and tell the admin
+        // (unconfirmedAlertedAt).
         reminderSentAt: { type: Date },
+        secondReminderSentAt: { type: Date },
         unconfirmedAlertedAt: { type: Date },
         awaitingCancelReason: { type: Boolean, default: false },
         // Set when the customer confirmed but their saved address doesn't resolve to Jeddah/Makkah — the booking
