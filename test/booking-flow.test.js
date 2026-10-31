@@ -748,3 +748,24 @@ test('admin cancel of an assigned booking pushes the technician', async () => {
   assert.equal(push.data.event, 'cancelled');
   assert.equal(String(push.user), IDS.tech);
 });
+
+test('WhatsApp booking for a number an unproven app account typed in: phone-only booking, no crash', async () => {
+  const dispatch = require('../utils/dispatch');
+  const saved = { findOne: User.findOne, create: Booking.create, dispatch: dispatch.dispatch };
+  let created = null;
+  User.findOne = async () => ({ _id: IDS.other, role: 'customer', authProvider: 'local', email: 'o@example.com', password: 'x', fullName: 'Other' });
+  Booking.create = async (data) => { created = data; return { ...data, _id: IDS.booking }; };
+  dispatch.dispatch = async () => null;
+  try {
+    const booking = await router.createBookingForPhone({
+      customerName: 'Walk-in', phone: '0565635279', serviceRecord: { _id: 'svc1', name: 'AC Repair', basePrice: 150, category: 'ac' },
+      date: day(1), time: 'Anytime', address: 'Al Faiha, Jeddah', language: 'ar',
+    });
+    assert.equal(created.user, undefined, 'not attached to the unproven account');
+    assert.equal(created.statusHistory[0].actor, undefined);
+    assert.equal(created.email, '');
+    assert.equal(booking.status, 'pending');
+  } finally {
+    User.findOne = saved.findOne; Booking.create = saved.create; dispatch.dispatch = saved.dispatch;
+  }
+});

@@ -1090,18 +1090,18 @@ const createBookingForPhone = async ({ customerName, phone, serviceRecord, date,
     status: 'pending',
     servicePrice, visitCharges, totalAmount,
     emailActionNonce,
-    statusHistory: [{ status: 'pending', timestamp: new Date(), note: 'Booked via WhatsApp', actorRole: 'customer', actor: user._id }],
+    statusHistory: [{ status: 'pending', timestamp: new Date(), note: 'Booked via WhatsApp', actorRole: 'customer', actor: user ? user._id : undefined }],
   });
 
   const emailData = {
     bookingId, orderNumber, customerName: booking.customerName,
-    customerEmail: user.email || '', customerPhone: normalizedPhone,
+    customerEmail: (user && user.email) || '', customerPhone: normalizedPhone,
     country: detectedCountry, city: '', currency: detectedCurrency,
     serviceName: serviceRecord.name, serviceIcon: serviceRecord.icon || '❄️',
     date, time, address, comments: '',
     servicePrice, visitCharges, totalAmount,
   };
-  if (user.email) sendBookingReceivedEmail(user.email, emailData);
+  if (user && user.email) sendBookingReceivedEmail(user.email, emailData);
   sendAdminNotificationEmail({ ...emailData, emailNonce: emailActionNonce });
   notifyBooking(booking, 'received');
 
