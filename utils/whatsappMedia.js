@@ -71,6 +71,30 @@ const handleImage = async (phone, message, isAr) => {
   return true;
 };
 
+// A location pin sent outside the booking chat — in the chats, customers sent their pin right after the confirmation
+// message and were told "I can only read text". It now goes onto their latest active booking for the technician.
+// Returns true when handled; false (no usable pin) lets the caller answer as before.
+const handleLocation = async (phone, location, isAr) => {
+  const lat = Number(location && location.latitude);
+  const lng = Number(location && location.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return false;
+  const booking = await Booking.findOne({ phone: { $in: phoneVariants(phone) }, status: { $in: ACTIVE }, deletedAt: null }).sort({ createdAt: -1 });
+  if (!booking) {
+    await reply(phone, L(isAr,
+      'Thanks for your location! 📍 To book a technician, tap "Book a service" below — you can share the location again in the booking.',
+      'شكراً على مشاركة موقعك! 📍 لحجز فني اضغط «حجز خدمة» أدناه، ويمكنك مشاركة الموقع مرة أخرى أثناء الحجز.'),
+    [{ id: 'menu_book', title: L(isAr, 'Book a service', 'حجز خدمة') }, { id: 'menu_human', title: L(isAr, 'Talk to our team', 'تحدث مع فريقنا') }]);
+    return true;
+  }
+  await Booking.updateOne({ _id: booking._id }, {
+    $set: { coordinates: { latitude: lat, longitude: lng }, location: { type: 'Point', coordinates: [lng, lat] } },
+  });
+  await reply(phone, L(isAr,
+    `Location received 📍 We added it to booking #${booking.orderNumber} so the technician can find you easily.`,
+    `تم استلام موقعك 📍 أضفناه إلى الحجز رقم ${booking.orderNumber} ليسهل على الفني الوصول إليك.`));
+  return true;
+};
+
 // A voice note -> text, or null if it cannot be transcribed.
 const transcribe = async (message) => {
   const audio = message.audio || message.voice;
@@ -92,4 +116,4 @@ const transcribe = async (message) => {
   }
 };
 
-module.exports = { handleImage, transcribe };
+module.exports = { handleImage, handleLocation, transcribe };

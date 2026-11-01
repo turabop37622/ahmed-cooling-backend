@@ -110,6 +110,7 @@ const handleMessage = async (message, waId, customerName) => {
   if (isText && await bookingBot.handleBookingReasonText(phone, text)) return;
   if (isText && await bookingBot.handleAddressFixText(phone, text)) return;
   if (isText && await bookingBot.handleTypedReply(phone, text)) return;
+  if (isText && await bookingBot.handleBookingNote(phone, text)) return;
 
   // A person has taken over this conversation, so the bot stays quiet — but not forever: if the customer asked for the team
   // and nobody answered within HANDOFF_WAIT_MIN, or the admin went silent for HUMAN_IDLE_MIN, the bot takes over again.
@@ -127,6 +128,8 @@ const handleMessage = async (message, waId, customerName) => {
     conversation.bookingDraft = undefined;
   }
   if (message.type === 'location' && await bookingFlow.handleLocation(phone, message.location, conversation)) return;
+  // A pin sent outside the booking chat (e.g. after the confirmation message) goes onto their open booking.
+  if (message.type === 'location' && await media.handleLocation(phone, message.location, conversation.language === 'ar')) return;
 
   // A photo goes onto the customer's active booking; a voice note becomes text and is handled like a typed message.
   if (message.type === 'image' && await media.handleImage(phone, message, conversation.language === 'ar')) return;
@@ -136,6 +139,7 @@ const handleMessage = async (message, waId, customerName) => {
       text = heard;
       isText = true;
       await store.logMessage(phone, 'in', `🎤 ${heard}`, { messageType: 'text' });
+      if (await bookingBot.handleBookingNote(phone, heard)) return;
     }
   }
 

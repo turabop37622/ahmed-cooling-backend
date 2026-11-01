@@ -287,7 +287,9 @@
         // Set when the customer confirmed but their saved address doesn't resolve to Jeddah/Makkah — the booking
         // stays 'pending' and we're waiting on their next message to be a corrected address.
         awaitingAddressFix: { type: Boolean, default: false },
-        customerReply: { type: String, enum: ['confirm', 'cancel'] },
+        // 'note': they answered with more than yes/no ("yes, but only on Tuesday") — the text is in customerReplyReason
+        // and a person arranges it with them.
+        customerReply: { type: String, enum: ['confirm', 'cancel', 'note'] },
         customerReplyReason: { type: String },
         customerRepliedAt: { type: Date }
       },

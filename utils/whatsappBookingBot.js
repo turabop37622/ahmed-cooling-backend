@@ -19,7 +19,7 @@ const Booking = require('../models/Booking');
 const { normalizePhone, canonicalSaudiMobile, phoneVariants } = require('./phone');
 const { escapeHtml } = require('./security');
 const whatsappCloud = require('./whatsappCloud');
-const { logMessage } = require('./whatsappConversationStore');
+const { logMessage, setStatus } = require('./whatsappConversationStore');
 const autoAssign = require('./autoAssign');
 const dispatch = require('./dispatch');
 const { normalizeCity } = autoAssign;
@@ -354,6 +354,43 @@ const handleTypedReply = async (phone, text) => {
   return handleBookingButton(phone, isYes ? CONFIRM_PAYLOAD : CANCEL_PAYLOAD);
 };
 
+// A typed answer to the confirmation that is more than a plain yes/no — "نعم لكن متواجد فقط يوم الثلاثاء وجمعه وسبت",
+// "ok but tomorrow evening", "kal shaam ko aa jao". The customer HAS answered, but a person has to arrange it: before
+// this, the AI took such a reply for a new customer and pushed them to book again. Now it is saved on the booking,
+// the customer is told the team will arrange it, the chat goes to the team and the admin gets an email.
+// The booking stays pending (the template's Confirm button still works). Returns true if it was such a reply.
+const YES_START_RE = /^(yes|yeah|ok|okay|haan|han|ji|نعم|ايوه|أيوه|اكيد|أكيد|تمام|موافق)(\s|[,،.!]|$)/i;
+const NO_START_RE = /^(no|nahi|nahin|لا)(\s|[,،.!]|$)/i;
+const SCHEDULE_RE = /\b(today|tomorrow|tonight|morning|evening|afternoon|monday|tuesday|wednesday|thursday|friday|saturday|sunday|reschedule|another (day|time)|aaj|kal|subah|shaam|sham|parson)\b|اليوم|بكره|بكرة|غدا|الصبح|الصباح|المساء|العصر|الظهر|الليل|السبت|الاحد|الأحد|الاثنين|الإثنين|الثلاثاء|الاربعاء|الأربعاء|الخميس|الجمعه|الجمعة|موعد آخر|يوم آخر|وقت آخر/i;
+const NOTE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const handleBookingNote = async (phone, text) => {
+  const t = String(text || '').trim();
+  if (!t || TYPED_YES_RE.test(t) || TYPED_NO_RE.test(t)) return false;
+  if (!YES_START_RE.test(t) && !NO_START_RE.test(t) && !SCHEDULE_RE.test(t)) return false;
+  const booking = await findAwaitingBooking(phone, {
+    'whatsappBot.customerReply': { $exists: false },
+    'whatsappBot.confirmationSentAt': { $gte: new Date(Date.now() - NOTE_WINDOW_MS) },
+  });
+  if (!booking) return false;
+
+  const note = t.slice(0, 500);
+  await Booking.updateOne({ _id: booking._id }, {
+    $set: { 'whatsappBot.customerReply': 'note', 'whatsappBot.customerReplyReason': note, 'whatsappBot.customerRepliedAt': new Date() },
+  });
+  await setStatus(phone, 'needs_human');
+  const isAr = /[؀-ۿ]/.test(t) || (booking.language === 'ar' && !/[a-z]/i.test(t));
+  const ack = isAr
+    ? `شكراً لك! سجّلنا ملاحظتك على الحجز رقم ${booking.orderNumber}، وسيتواصل معك فريقنا هنا قريباً لترتيب الموعد المناسب لك 🙏`
+    : `Thank you! We've noted this on booking #${booking.orderNumber}, and our team will contact you here shortly to arrange a time that suits you 🙏`;
+  await whatsappCloud.sendTextMessage(phone, ack);
+  await logMessage(phone, 'out', ack, { messageType: 'text', sentBy: 'bot' });
+  await notifyAdminIssue(booking, {
+    issue: 'Customer answered the confirmation with a note',
+    detail: `The customer wrote: "${note}". Please arrange it with them in the WhatsApp Inbox, then confirm or reschedule the booking.`,
+  });
+  return true;
+};
+
 // Called by routes/whatsappWebhook.js for a plain text reply. Returns true if this phone had an open "please
 // resend a full address" question outstanding (see handleBookingButton above).
 const handleAddressFixText = async (phone, text) => {
@@ -389,4 +426,4 @@ const handleAddressFixText = async (phone, text) => {
   return true;
 };
 
-module.exports = { startScheduler, tick, chaseUnanswered, handleBookingButton, handleBookingReasonText, handleAddressFixText, handleTypedReply };
+module.exports = { startScheduler, tick, chaseUnanswered, handleBookingButton, handleBookingReasonText, handleAddressFixText, handleTypedReply, handleBookingNote };

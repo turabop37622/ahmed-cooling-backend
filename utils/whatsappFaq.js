@@ -43,7 +43,8 @@ const anyTokenIn = (tokens, set) => tokens.some((t) => set.has(t));
 
 // "My inverter problem", "AC is not cooling", "meri fridge cooling nahi kar rahi", "المكيف لا يبرد": the customer is describing
 // something that is wrong, so it is a conversation (the AI), not a service choice or a price card.
-const PROBLEM_RE = /\b(problem|issue|not\s*(working|cooling|starting|turning|running)|broken|stopped|noise|noisy|leak|leaking|fault|trouble|smell|burning|kharab|masla|mushkil|nahi|nahin|band|garam|shor|awaaz|tapak|pani)\b|(مشكل|عطل|خراب|تعطل|لا\s*يعمل|ما\s*يشتغل|لا\s*يبرد|ما\s*يبرد|تسريب|صوت|يسرب|مايبرد|ما\s*تبرد|لا\s*تبرد|ما\s*تشتغل)/i;
+// "فيه قفلة كهرباء" (it trips the power) is a symptom of the appliance being discussed, not a request for wiring work.
+const PROBLEM_RE = /\b(problem|issue|not\s*(working|cooling|starting|turning|running)|broken|stopped|noise|noisy|leak|leaking|fault|trouble|smell|burning|trips?|tripping|short\s*circuit|sparks?|kharab|masla|mushkil|nahi|nahin|band|garam|shor|awaaz|tapak|pani)\b|(مشكل|عطل|خراب|تعطل|لا\s*يعمل|ما\s*يشتغل|لا\s*يبرد|ما\s*يبرد|تسريب|صوت|يسرب|مايبرد|ما\s*تبرد|لا\s*تبرد|ما\s*تشتغل|قفل[هة]|يفصل|تفصل|ينطفي|يطفي|شرار|تماس)/i;
 
 // Urdu typed in Latin letters ("meri fridge cooling nahi kar rahi"): at least two common Urdu words and no Arabic script.
 // Our tayyar (canned) answers exist in English and Arabic only, so these messages go to the AI, which answers in Roman Urdu.
@@ -53,6 +54,10 @@ const isRomanUrdu = (text) => {
   if (/[\u0600-\u06FF]/.test(raw)) return false;
   return (raw.toLowerCase().match(ROMAN_URDU_WORDS) || []).length >= 2;
 };
+
+// A voice note in Urdu often comes back from the speech-to-text in Hindi (Devanagari) letters. Our customers read
+// Roman Urdu, not Devanagari, so such a message is answered in Roman Urdu.
+const isDevanagari = (text) => /[ऀ-ॿ]/.test(String(text || ''));
 
 const isGreeting = (norm) => {
   const tokens = tokensOf(norm);
@@ -74,7 +79,17 @@ const languageRequest = (norm) => {
 };
 
 // ---------- which question is this? (checked top to bottom, first hit wins) ----------
+// Places customers have asked about that we do not serve ("do you work in Qatar?"). Madinah is left out on purpose:
+// "Madinah Road" is one of Jeddah's main streets and shows up in addresses.
+const OTHER_PLACE_RE = /\b(qatar|doha|dubai|uae|emirates|kuwait|bahrain|oman|pakistan|lahore|karachi|islamabad|india|riyadh|dammam|khobar|taif|tabuk|abha|yanbu|rabigh|jizan|jazan)\b|قطر|الدوحه|دبي|الامارات|الكويت|البحرين|باكستان|الرياض|الدمام|الخبر|الطايف|الطائف|تبوك|ابها|ينبع|رابغ|جيزان|جازان/;
+const JEDDAH_MAKKAH_RE = /jedd|jidd|jedah|jidah|makk|mekk|mecca|makah|جده|مكه/;
+
 const INTENTS = [
+  ['other_area', { test: (norm) => OTHER_PLACE_RE.test(norm) && !JEDDAH_MAKKAH_RE.test(norm) }],
+  // "Technician number" / "send number": the customer wants someone to call — never answer "I can't give a number".
+  ['tech_contact', /\b(technician|tech|engineer|worker|fundi|mistri)('?s)? (number|no|phone|mobile|contact)|رقم (ال)?(فني|مهندس|عامل)/],
+  // "Can I have your location?" — we come to them, so say that instead of a price card.
+  ['our_location', /(your|shop|workshop|office) (location|address)|where (are you|is your (shop|workshop|office))|send (me )?(your )?location|apki (location|dukan|shop)|aap ki (location|dukan|shop)|ممكن (ال)?لوكيشن|(ارسل|ارسلي|ارسلو|عطني|ابغي) (لي )?(ال)?لوكيشن|لوكيشن(كم| المحل| الورشه)|وين (محلكم|الورشه|مكانكم|موقعكم)|عنوانكم|موقع (المحل|الورشه)/],
   ['cancel_change', /\b(cancel|reschedule|postpone)\b|change (my )?(booking|appointment|time|date|slot)|الغاء|تاجيل|تغيير (ال)?موعد|تعديل (ال)?(حجز|موعد)/],
   ['status', /my booking (status|details|time)|booking status|status of (my|the)|where is (my|the) (technician|tech|engineer)|technician (status|location)|track (my|the)|order status|meri booking ka|booking ka status|technician kahan|حجزي|حاله (حجزي|الحجز|الطلب)|وين الفني|فين الفني|اين الفني|موعدي|طلبي/],
   ['visit_fee', /visit(ing)? (fee|charge|cost)|inspection (fee|charge)|diagnos(is|tic) (fee|charge)|رسوم (ال)?زياره|سعر (ال)?زياره|تكلفه (ال)?زياره|رسوم (ال)?كشف/],
@@ -85,7 +100,7 @@ const INTENTS = [
   ['arrival', /(how (long|soon|fast)|when will).{0,30}(arrive|come|reach|technician|tech)|\b(eta|arrival)\b|كم (يوصل|ياخذ|تاخذ)|متي (يوصل|ياتي|يجي|تصلون)|technician kab/],
   ['hours', /\b(hours?|timings?|timing|open|opening|closing|24\/7|24 hours|emergency|urgent|urgently|working time)\b|ساعات (ال)?(عمل|دوام)|دوام|اوقات|مفتوح|طواري|طاري|عاجل|24 ساعه|على مدار/],
   ['areas', /(which|what|any) (areas?|cit(y|ies)|locations?|neighbou?rhoods?)|do you (serve|cover|operate)|service areas?|coverage|\bareas\b|مناطق|مدن|تخدمون|تغطون|تغطيه|وين تخدمون|فين تخدمون/],
-  ['contact', /contact|phone number|(your|the) number|call (you|us)|website|e-?mail|رقم (ال)?(هاتف|تواصل|جوال|واتس)|رقمكم|اتصال|الاتصال|تواصل|موقعكم|الموقع الالكتروني|ايميل|بريد/],
+  ['contact', /contact|phone number|(your|the) number|(send|share|give)( me)?( the| your)? (number|no|mobile)|number (do|dein|dena|bhejo|send)|call (you|us)|website|e-?mail|رقم (ال)?(هاتف|تواصل|جوال|واتس)|رقمكم|اتصال|الاتصال|تواصل|موقعكم|الموقع الالكتروني|ايميل|بريد/],
   ['services_overview', /(what|which|kind of|types? of).{0,20}services?|your services?|services you|do you (offer|provide)|what do you (offer|do|repair|fix|provide)|what can you|list of services|\bservices\b|kia kia|konsi|kon si|apke pas|ماذا تقدمون|ايش (تقدمون|عندكم|الخدمات)|وش (تقدمون|عندكم|خدماتكم)|شو (تقدمون|عندكم|خدماتكم)|خدماتكم|خدماتنا|الخدمات|ما هي (ال)?خدمات/],
 ];
 
@@ -173,7 +188,8 @@ const findServices = (norm, limit = 5) => {
 };
 
 // ---------- reply texts ----------
-const L = (lang, en, ar) => (lang === 'ar' ? ar : en);
+// lang is 'en' | 'ar' | 'ur' (Roman Urdu); a reply without a Roman Urdu text falls back to English.
+const L = (lang, en, ar, ur) => (lang === 'ar' ? ar : lang === 'ur' && ur ? ur : en);
 const serviceName = (s, lang) => (lang === 'ar' && s.nameAr ? s.nameAr : s.name);
 
 const serviceLine = (s, lang, detailed) => {
@@ -204,8 +220,20 @@ const serviceReply = (services, lang) => {
 };
 
 const REPLIES = {
-  thanks: (lang) => L(lang, 'You\'re welcome! Let us know if you need anything else.', 'العفو! أخبرنا إذا احتجت أي شيء آخر.'),
-  areas: (lang) => L(lang, 'We currently serve Jeddah and Makkah only.', 'نخدم حالياً مدينتي جدة ومكة فقط.'),
+  thanks: (lang) => L(lang, 'You\'re welcome! 😊 We\'re here whenever you need us.', 'العفو! 😊 نحن في خدمتك في أي وقت.', 'Koi baat nahi! 😊 Jab bhi zaroorat ho, hum yahan hain.'),
+  areas: (lang) => L(lang, 'We currently serve Jeddah and Makkah only.', 'نخدم حالياً مدينتي جدة ومكة فقط.', 'Hum abhi sirf Jeddah aur Makkah mein service dete hain.'),
+  other_area: (lang) => L(lang,
+    'Sorry, we don\'t work there yet 🙏 We currently serve Jeddah and Makkah only. If you are in one of them, we\'d be happy to help!',
+    'نعتذر، لا نخدم هذه المنطقة حالياً 🙏 خدماتنا متوفرة في جدة ومكة فقط. إذا كنت في إحداهما يسعدنا خدمتك!',
+    'Maazrat 🙏 hum wahan service nahi dete. Abhi sirf Jeddah aur Makkah mein kaam karte hain — agar aap in mein se kisi sheher mein hain to hum zaroor madad karenge!'),
+  tech_contact: (lang) => L(lang,
+    'Once a technician is assigned to your booking, they call you themselves before they come. For anything right now, tap "Talk to our team" below and a person will reply to you right here.',
+    'بعد تعيين فني لحجزك يتصل بك بنفسه قبل الوصول. ولأي استفسار الآن اضغط «تحدث مع فريقنا» أدناه وسيرد عليك أحد موظفينا هنا.',
+    'Booking par technician lagte hi woh aane se pehle aap ko khud call karta hai. Abhi kuch poochna ho to neeche "Talk to our team" dabayen — hamari team isi chat mein jawab degi.'),
+  our_location: (lang) => L(lang,
+    'No need to bring anything to us 🙂 Our technician comes to your home anywhere in Jeddah or Makkah. Tap "Book a service" below and share your location while booking.',
+    'لا داعي لإحضار الجهاز 🙂 فنينا يأتي إليك في المنزل في أي مكان بجدة أو مكة. اضغط «حجز خدمة» أدناه وشارك موقعك أثناء الحجز.',
+    'Aap ko kuch le kar aane ki zaroorat nahi 🙂 Hamara technician Jeddah ya Makkah mein aap ke ghar aata hai. Neeche "Book a service" dabayen aur booking mein apni location bhej dein.'),
   hours: (lang) => L(lang,
     'Our emergency support line runs 24/7, every day. You can book a technician visit here anytime and we\'ll confirm the slot.',
     'خط الدعم الطارئ يعمل على مدار الساعة طوال أيام الأسبوع. يمكنك حجز زيارة فني هنا في أي وقت وسنؤكد الموعد.'),
@@ -229,13 +257,14 @@ const REPLIES = {
     'لإلغاء الحجز أو تعديله، افتح «حجوزاتي» في التطبيق، أو اضغط «تحدث مع فريقنا» أدناه وسنساعدك.'),
   contact: (lang) => L(lang,
     `You can reach us right here on WhatsApp (${PHONE}) or at ${WEBSITE}. Emergency support runs 24/7.`,
-    `يمكنك التواصل معنا هنا على واتساب (${PHONE}) أو عبر ${WEBSITE}. الدعم الطارئ متاح على مدار الساعة.`),
+    `يمكنك التواصل معنا هنا على واتساب (${PHONE}) أو عبر ${WEBSITE}. الدعم الطارئ متاح على مدار الساعة.`,
+    `Hamara WhatsApp number ${PHONE} hai — yahi chat. Website: ${WEBSITE}. Emergency support 24/7 hai.`),
   contact_menu: (lang) => L(lang,
     `Reach us right here on WhatsApp (${PHONE}) or at ${WEBSITE}. Our emergency support line runs 24/7, every day.`,
     `تواصل معنا هنا على واتساب (${PHONE}) أو عبر ${WEBSITE}. خط الدعم الطارئ يعمل على مدار الساعة طوال أيام الأسبوع.`),
 };
 
 module.exports = {
-  normalize, tokensOf, PROBLEM_RE, isRomanUrdu, isGreeting, isThanks, languageRequest, matchIntent, findServices,
+  normalize, tokensOf, PROBLEM_RE, isRomanUrdu, isDevanagari, isGreeting, isThanks, languageRequest, matchIntent, findServices,
   servicesOverview, serviceReply, REPLIES, PRICE_NOTE, VISIT_FEE,
 };

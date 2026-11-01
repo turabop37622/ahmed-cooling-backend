@@ -1,8 +1,8 @@
 // The WhatsApp "front door": everything a customer sees before (and around) a booking, built from tappable
 // buttons so they type as little as possible.
 //
-//   first message -> bilingual welcome + [English] [العربية] buttons (written in Arabic -> straight to the Arabic menu)
-//   language chosen -> main menu (a native list: book, services & prices, booking status, areas, contact, a human)
+//   first message -> its language is taken from the text (Arabic script -> Arabic, otherwise English), a hello gets
+//                    the welcome + main menu (a native list: book, services & prices, booking status, areas, contact, a human)
 //   a question typed in free text -> an instant canned answer (utils/whatsappFaq.js) with follow-up buttons,
 //                                    or, for a booking request, the step-by-step flow (utils/whatsappBookingFlow.js)
 //   anything else -> returns false and the caller asks the AI (utils/whatsappChatbot.js)
@@ -133,7 +133,9 @@ const handleMenuId = async (phone, id, conversation, lang) => {
   }
 };
 
-const GENERIC_HANDLED = ['areas', 'hours', 'payment', 'visit_fee', 'warranty', 'arrival', 'how_to_book', 'cancel_change', 'contact'];
+const GENERIC_HANDLED = ['other_area', 'tech_contact', 'our_location', 'areas', 'hours', 'payment', 'visit_fee', 'warranty', 'arrival', 'how_to_book', 'cancel_change', 'contact'];
+// The canned answers that also have a Roman Urdu text (utils/whatsappFaq.js); other Roman Urdu questions go to the AI.
+const ROMAN_URDU_HANDLED = ['other_area', 'tech_contact', 'our_location', 'areas', 'contact'];
 
 // Returns true if this message was fully answered here, false if the caller should fall back to the AI.
 // `input` is either typed text or the id of a tapped button/list row.
@@ -167,16 +169,12 @@ const handle = async (phone, input, conversation) => {
     }
   }
 
+  // No "choose your language" step any more: in the chats, customers who got those two buttons as the answer to
+  // their first message often never wrote again. The language is taken from what they typed (Arabic script ->
+  // Arabic, otherwise English; Roman Urdu is answered in Roman Urdu by the AI), and the welcome says how to switch.
   let lang = conversation?.language;
   if (!lang) {
-    if (!conversation?.languagePromptedAt) {
-      // Remember a real first question so it isn't lost while they pick a language.
-      const norm = faq.normalize(input);
-      const isQuestion = !input.startsWith('menu_') && norm.length > 3 && !faq.isGreeting(norm) && !faq.isThanks(norm);
-      await sendLanguagePrompt(phone, isQuestion ? input : undefined);
-      return true;
-    }
-    lang = detectLang(input); // they ignored the buttons and typed — go by what they typed
+    lang = detectLang(input);
     await setLanguage(phone, lang);
   }
   if (conversation) conversation.language = lang;
@@ -189,9 +187,12 @@ const handle = async (phone, input, conversation) => {
 
   if (faq.isThanks(norm)) { await say(phone, faq.REPLIES.thanks(lang)); return true; }
   if (faq.isGreeting(norm)) {
-    // A hello opens a fresh chat, so offer the language choice every time; "menu"/"help" just show the menu.
+    // "menu"/"help" just show the menu; a hello gets a warm welcome with the menu (and, in English, how to switch to Arabic).
     if (/^(menu|start|help|قايمه|القايمه|ابدا|مساعده)$/.test(norm)) { await sendMainMenu(phone, lang); return true; }
-    await sendLanguagePrompt(phone);
+    const salaam = /\b(salam|salaam|assalam|assalamualaikum|aoa|slm|aslam|aslamo)\b|سلام/.test(norm);
+    await sendMainMenu(phone, lang, L(lang,
+      `${salaam ? 'Wa alaikum assalam' : 'Hello'} 👋 Welcome to Ahmed Cooling Workshop!\nللعربية اكتب «عربي»`,
+      `${salaam ? 'وعليكم السلام ورحمة الله وبركاته' : 'أهلاً وسهلاً'} 👋\nمرحباً بكم في ورشة أحمد للتبريد!`));
     return true;
   }
 
@@ -212,6 +213,7 @@ const handle = async (phone, input, conversation) => {
   // (which have their own buttons) the AI answers, in Roman Urdu.
   if (faq.isRomanUrdu(input)) {
     if (intent === 'status') { await bookingStatusReply(phone, lang); return true; }
+    if (ROMAN_URDU_HANDLED.includes(intent)) { await answer(phone, lang, faq.REPLIES[intent]('ur')); return true; }
     if (await bookingFlow.handleMessage(phone, input, conversation)) return true;
     return false;
   }
@@ -235,8 +237,8 @@ const handle = async (phone, input, conversation) => {
 // Photos, voice notes, locations, stickers... — we can only read text and taps, so say so instead of staying silent.
 const handleUnsupported = async (phone, conversation) => {
   const lang = conversation?.language;
-  const en = 'Sorry, I can only read text messages and button taps here. Please type your message or pick an option below.';
-  const ar = 'عذراً، أستطيع قراءة الرسائل النصية والأزرار فقط هنا. الرجاء كتابة رسالتك أو اختيار أحد الخيارات أدناه.';
+  const en = 'Sorry, I can\'t open this kind of message 🙏 Please type your message or send a voice note, or pick an option below.';
+  const ar = 'عذراً، لا أستطيع فتح هذا النوع من الرسائل 🙏 اكتب رسالتك أو أرسل رسالة صوتية، أو اختر من الخيارات أدناه.';
   const body = lang ? L(lang, en, ar) : `${en}\n\n${ar}`;
   await sayButtons(phone, body, [
     { id: 'menu_main', title: L(lang, 'Main menu', 'القائمة الرئيسية') },

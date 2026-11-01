@@ -424,16 +424,18 @@ const advanceDraft = async (phone, rawInput, draft, isAr) => {
 
   if (draft.step === 'address') {
     const address = input.trim().slice(0, 300);
+    // A customer stuck on the address can always reach a person (one went round this loop three times).
+    const stuck = [{ id: 'menu_human', title: L(isAr, 'Talk to our team', 'تحدث مع فريقنا') }];
     if (address.length < 12 || !/\s/.test(address)) {
-      await reply(phone, L(isAr,
-        'That\'s too short for a technician to find you — please include the area, street, and building/landmark.',
-        'هذا العنوان غير كافٍ لوصول الفني — الرجاء ذكر الحي والشارع والمبنى أو أقرب معلم.'));
+      await replyButtons(phone, L(isAr,
+        'Could you add a little more detail so the technician can find you? 🙂 Please write the area, street and building or a nearby landmark — or send your location pin 📍',
+        'ممكن تفاصيل أكثر حتى يصل إليك الفني بسهولة؟ 🙂 اكتب الحي والشارع والمبنى أو أقرب معلم، أو أرسل موقعك 📍'), stuck);
       return;
     }
     if (!normalizeCity(address)) {
-      await reply(phone, L(isAr,
-        'We only serve Jeddah and Makkah — please include the city name in your address (e.g. "..., Jeddah").',
-        'نقدم خدماتنا في جدة ومكة فقط — الرجاء ذكر اسم المدينة ضمن العنوان (مثال: "...، جدة").'));
+      await replyButtons(phone, L(isAr,
+        'Which city is this in? We serve Jeddah and Makkah — please add the city to the address (e.g. "..., Jeddah"), or send your location pin 📍',
+        'في أي مدينة هذا العنوان؟ نخدم جدة ومكة — الرجاء إضافة اسم المدينة (مثال: "...، جدة")، أو أرسل موقعك 📍'), stuck);
       return;
     }
     const confirmed = { ...draft, step: 'confirm', address, latitude: null, longitude: null };
@@ -551,12 +553,14 @@ const handleLocation = async (phone, location, conversation) => {
 
   const named = [location.name, location.address].filter((v) => typeof v === 'string' && v.trim()).map((v) => v.trim());
   const geocoded = await reverseGeocode(lat, lng, 'en');
-  let address = [...named, geocoded].filter(Boolean).join(', ').slice(0, 300);
+  // WhatsApp often sends the same text as the pin's name and its address — show it once.
+  let address = [...new Set([...named, geocoded].filter(Boolean))].join(', ').slice(0, 300);
   const city = normalizeCity(address) ? null : cityFromCoords(lat, lng);
   if (!normalizeCity(address) && !city) {
-    await reply(phone, L(isAr,
-      'That pin is outside Jeddah and Makkah, where we work. Please share a location there, or type your address.',
-      'هذا الموقع خارج جدة ومكة حيث نعمل. الرجاء مشاركة موقع داخلهما أو كتابة العنوان.'));
+    await replyButtons(phone, L(isAr,
+      'Hmm, that pin looks outside Jeddah and Makkah, where we work. Please share a location there, or just type your address with the city.',
+      'يبدو أن هذا الموقع خارج جدة ومكة حيث نعمل. الرجاء مشاركة موقع داخلهما، أو كتابة العنوان مع اسم المدينة.'),
+    [{ id: 'menu_human', title: L(isAr, 'Talk to our team', 'تحدث مع فريقنا') }]);
     return true;
   }
   if (city) address = [address, city].filter(Boolean).join(', ');

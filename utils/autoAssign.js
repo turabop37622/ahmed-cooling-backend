@@ -28,7 +28,7 @@ const normalizeText = (s) => String(s || '')
 const normalizeCity = (value) => {
   const s = normalizeText(value);
   if (!s.trim()) return null;
-  if (/jedd|jidd|jeda\b|jiddah|جده|جدا\b/.test(s)) return 'jeddah';
+  if (/jedd|jidd|jeda\b|jedah|jidah|jiddah|جده|جدا\b/.test(s)) return 'jeddah'; // "In jedah i swear" — a real customer
   if (/makk|mekk|mecca|makah|macca|مكه|مكا\b/.test(s)) return 'makkah';
   return null;
 };
