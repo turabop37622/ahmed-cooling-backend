@@ -50,7 +50,7 @@ How to talk:
 - Warm and natural, short: 1-3 sentences, like a real WhatsApp chat. At most one emoji. No lists unless they ask for prices of several services. No markdown.
 - Answer what they actually asked first, then (only if it fits) one next step.
 - Use what was already said in this chat; never ask again for something the customer told you.
-- Language: reply in the language of the customer's last message — Arabic (Saudi-friendly, simple), English, or Roman Urdu (Urdu in Latin letters, e.g. "Ji bilkul, hamara technician aap ke ghar aa kar check karega."). If the message is in Hindi/Devanagari letters it is a Pakistani customer's voice note: reply in Roman Urdu, NEVER in Devanagari or Urdu script.
+- Language: you may ONLY write in English, Arabic or Roman Urdu — never any other language or script. Reply in the one that matches the customer's last message: Arabic (Saudi-friendly, simple), English, or Roman Urdu (Urdu in Latin letters, e.g. "Ji bilkul, hamara technician aap ke ghar aa kar check karega."). A message in Hindi/Devanagari letters or in Urdu script is from an Urdu speaker: reply in Roman Urdu. A message in any other language (French, Bengali, Indonesian, Tagalog, ...): reply in English.
 - Three buttons are shown under your message automatically: "Book a service", "Main menu", "Talk to our team" (Arabic: «حجز خدمة»، «القائمة الرئيسية»، «تحدث مع فريقنا»). NEVER list or repeat the buttons in your text. When you suggest one, name only that one, exactly as it is shown (see the last line below), in a sentence of the customer's own language. Never tell them to type "menu" or "I want to book a service".
 - Plain text only: no HTML, no <br>, no brackets.
 - Do not start with "I'm sorry, but I can't…". Say what we CAN do.
@@ -119,17 +119,23 @@ const loadHistory = async (phone, userText) => {
   }
 };
 
-const callGroq = async (phone, userText, language, isAr) => {
+// The only reply languages: English, Arabic, Roman Urdu. A reply in any other script (Hindi, Urdu script, Bengali,
+// Cyrillic, Chinese...) is never sent — it is asked for again, once, in an allowed language.
+const OTHER_SCRIPT_RE = /[Ѐ-ӿऀ-෿฀-๿぀-鿿가-힯]/;
+const allowedReplyLanguage = (reply) => !OTHER_SCRIPT_RE.test(reply) && !faq.isUrduScript(reply);
+const RETRY_LANGUAGE_HINT = '\nIMPORTANT: your previous answer used a language that is not allowed. Answer again ONLY in English, Arabic or Roman Urdu (Urdu in Latin letters) — no other language or script.';
+
+const callGroq = async (phone, userText, language, isAr, extraHint = '') => {
   if (!GROQ_API_KEY) return null;
   const history = await loadHistory(phone, userText);
   const langHint = language === 'ar'
-    ? '\nThe customer chose Arabic as their language: answer in Arabic unless they clearly write in another language.'
+    ? '\nThe customer chose Arabic as their language: answer in Arabic unless they clearly write in English or Urdu (then English or Roman Urdu).'
     : language === 'en'
       ? '\nThe customer chose English in the menu, but answer in the language of their last message: if it is Roman Urdu / Hindi (Urdu written in Latin letters) reply in Roman Urdu, if it is Arabic reply in Arabic, otherwise reply in English.'
       : '';
   // Urdu typed in Latin letters is easy to mistake for English: spot it by its common words and say so explicitly.
-  const romanUrduHint = faq.isRomanUrdu(userText) || faq.isDevanagari(userText)
-    ? '\nThe customer\'s last message is Urdu (Roman Urdu, or a voice note written in Hindi letters): you MUST reply in Roman Urdu (Urdu in Latin letters, e.g. "Aap ka fridge kab se thanda nahi kar raha?"), not in English, Hindi or Urdu script.'
+  const romanUrduHint = speaksUrdu(userText)
+    ? '\nThe customer\'s last message is Urdu/Hindi (Roman Urdu, Urdu script, or a voice note written in Hindi letters): you MUST reply in Roman Urdu (Urdu in Latin letters, e.g. "Aap ka fridge kab se thanda nahi kar raha?"), not in English, Hindi or Urdu script.'
     : '';
   // The buttons go out in Arabic or English only (a Roman Urdu reply gets the English ones): name them as shown.
   const buttonHint = isAr
@@ -140,7 +146,7 @@ const callGroq = async (phone, userText, language, isAr) => {
     'https://api.groq.com/openai/v1/chat/completions',
     {
       model: GROQ_MODEL,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT(bookingContext) + langHint + romanUrduHint + buttonHint }, ...history, { role: 'user', content: userText }],
+      messages: [{ role: 'system', content: SYSTEM_PROMPT(bookingContext) + langHint + romanUrduHint + buttonHint + extraHint }, ...history, { role: 'user', content: userText }],
       // gpt-oss spends part of the budget on its own reasoning: keep that short and leave room for the whole answer
       reasoning_effort: 'low',
       max_tokens: 1200,
@@ -168,7 +174,7 @@ const HANDOFF_ACK = (isArabic, ur) => (isArabic
   ? 'شكراً لك، سيتواصل معك أحد أفراد فريقنا هنا في أقرب وقت ممكن 🙏'
   : ur ? 'Shukriya! Hamari team ka koi banda isi chat mein jald aap ko jawab dega 🙏'
     : 'Thank you! One of our team will reply to you right here shortly 🙏');
-const speaksUrdu = (text) => faq.isRomanUrdu(text) || faq.isDevanagari(text);
+const speaksUrdu = (text) => faq.isRomanUrdu(text) || faq.isDevanagari(text) || faq.isUrduScript(text);
 
 const notifyAdminHandoff = async (phone, customerName, lastMessage) => {
   if (!BREVO_API_KEY || !ADMIN_EMAIL) return;
@@ -243,7 +249,8 @@ const handleIncomingText = async (phone, text, conversation) => {
   const language = conversation?.language;
   // The reply (and its buttons) follow the script the customer actually wrote in; the saved choice only decides a
   // message with no letters of either kind.
-  const isAr = looksArabic(text) || (language === 'ar' && !/[a-z]/i.test(text));
+  // (Urdu script is Arabic letters too, but it is answered in Roman Urdu.)
+  const isAr = !faq.isUrduScript(text) && (looksArabic(text) || (language === 'ar' && !/[a-z]/i.test(text)));
   const ur = !isAr && speaksUrdu(text);
 
   if (isHandoffRequest(text)) {
@@ -263,7 +270,9 @@ const handleIncomingText = async (phone, text, conversation) => {
     return;
   }
 
-  const reply = await callGroq(phone, text, language, isAr);
+  let reply = await callGroq(phone, text, language, isAr);
+  if (reply && !allowedReplyLanguage(reply)) reply = await callGroq(phone, text, language, isAr, RETRY_LANGUAGE_HINT);
+  if (reply && !allowedReplyLanguage(reply)) reply = null;
   if (!reply) {
     await sendTroubleReply(phone, isAr, ur);
     return;

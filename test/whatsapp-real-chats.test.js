@@ -138,3 +138,40 @@ test('a location pin sent after booking goes onto the booking instead of "I can 
     WhatsAppMessage.create = saved.create; WhatsAppConversation.findOneAndUpdate = saved.conv;
   }
 });
+
+test('replies go out only in English, Arabic or Roman Urdu: a Hindi-script answer is asked for again, never sent', async () => {
+  const axios = require('axios');
+  const saved = {
+    key: process.env.GROQ_API_KEY, post: axios.post, buttons: whatsappCloud.sendButtonsMessage, text: whatsappCloud.sendTextMessage,
+    find: WhatsAppMessage.find, create: WhatsAppMessage.create, bfind: Booking.find, conv: WhatsAppConversation.findOneAndUpdate,
+  };
+  process.env.GROQ_API_KEY = 'test-key';
+  delete require.cache[require.resolve('../utils/whatsappChatbot')];
+  const answers = ['हमारा टेक्नीशियन आपके घर आएगा', 'Ji, hamara technician aap ke ghar aayega.'];
+  const prompts = []; const sent = [];
+  axios.post = async (url, body) => { prompts.push(body.messages[0].content); return { data: { choices: [{ message: { content: answers.shift() } }] } }; };
+  whatsappCloud.sendButtonsMessage = async (to, body) => { sent.push(body); };
+  whatsappCloud.sendTextMessage = async (to, body) => { sent.push(body); };
+  WhatsAppMessage.find = () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) });
+  WhatsAppMessage.create = async () => ({});
+  Booking.find = () => ({ sort: () => ({ limit: () => ({ select: () => ({ lean: async () => [] }) }) }) });
+  WhatsAppConversation.findOneAndUpdate = async () => ({});
+  try {
+    const chatbot = require('../utils/whatsappChatbot');
+    await chatbot.handleIncomingText('+966500000005', 'जड़ा मैसे ते हमारा दा लोकेशन', { status: 'bot', language: 'en' });
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /ONLY in English, Arabic or Roman Urdu/);
+    assert.deepEqual(sent, ['Ji, hamara technician aap ke ghar aayega.']);
+  } finally {
+    if (saved.key === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = saved.key;
+    axios.post = saved.post; whatsappCloud.sendButtonsMessage = saved.buttons; whatsappCloud.sendTextMessage = saved.text;
+    WhatsAppMessage.find = saved.find; WhatsAppMessage.create = saved.create; Booking.find = saved.bfind;
+    WhatsAppConversation.findOneAndUpdate = saved.conv;
+    delete require.cache[require.resolve('../utils/whatsappChatbot')];
+  }
+});
+
+test('Urdu script is not taken for Arabic', () => {
+  assert.ok(faq.isUrduScript('میرا فریج ٹھنڈا نہیں کر رہا ہے'));
+  assert.ok(!faq.isUrduScript('الثلاجة لا تبرد'));
+});

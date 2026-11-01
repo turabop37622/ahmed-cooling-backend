@@ -59,6 +59,10 @@ const isRomanUrdu = (text) => {
 // Roman Urdu, not Devanagari, so such a message is answered in Roman Urdu.
 const isDevanagari = (text) => /[ऀ-ॿ]/.test(String(text || ''));
 
+// Urdu written in its own (Arabic-based) script: letters Arabic does not use (ٹ ڈ ڑ ں ے ۓ ھ ۂ). Answered in Roman Urdu,
+// never in Arabic or Urdu script — the bot speaks only English, Arabic and Roman Urdu.
+const isUrduScript = (text) => /[ٹڈڑںھۂےۓ]/.test(String(text || ''));
+
 const isGreeting = (norm) => {
   const tokens = tokensOf(norm);
   return tokens.length <= 6 && anyTokenIn(tokens, GREETING) && allTokensIn(tokens, GREETING, FILLER);
@@ -265,6 +269,6 @@ const REPLIES = {
 };
 
 module.exports = {
-  normalize, tokensOf, PROBLEM_RE, isRomanUrdu, isDevanagari, isGreeting, isThanks, languageRequest, matchIntent, findServices,
+  normalize, tokensOf, PROBLEM_RE, isRomanUrdu, isDevanagari, isUrduScript, isGreeting, isThanks, languageRequest, matchIntent, findServices,
   servicesOverview, serviceReply, REPLIES, PRICE_NOTE, VISIT_FEE,
 };

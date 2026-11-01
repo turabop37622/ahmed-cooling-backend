@@ -22,7 +22,8 @@ const manage = require('./whatsappManage');
 const L = (lang, en, ar) => (lang === 'ar' ? ar : en);
 const BODY_MAX = 1000; // WhatsApp allows 1024 characters in an interactive message body
 const clamp = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
-const detectLang = (text) => (/[؀-ۿ]/.test(text) ? 'ar' : 'en');
+// Urdu script is Arabic letters too, but an Urdu speaker gets English menus (and Roman Urdu answers), not Arabic.
+const detectLang = (text) => (/[؀-ۿ]/.test(text) && !faq.isUrduScript(text) ? 'ar' : 'en');
 
 // ---------- sending (each also writes the admin-inbox log) ----------
 const say = async (phone, text) => {
@@ -211,7 +212,7 @@ const handle = async (phone, input, conversation) => {
 
   // Roman Urdu: the tayyar answers below are English / Arabic, so apart from a booking lookup or starting a booking
   // (which have their own buttons) the AI answers, in Roman Urdu.
-  if (faq.isRomanUrdu(input)) {
+  if (faq.isRomanUrdu(input) || faq.isUrduScript(input) || faq.isDevanagari(input)) {
     if (intent === 'status') { await bookingStatusReply(phone, lang); return true; }
     if (ROMAN_URDU_HANDLED.includes(intent)) { await answer(phone, lang, faq.REPLIES[intent]('ur')); return true; }
     if (await bookingFlow.handleMessage(phone, input, conversation)) return true;
