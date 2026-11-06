@@ -175,3 +175,10 @@ test('Urdu script is not taken for Arabic', () => {
   assert.ok(faq.isUrduScript('میرا فریج ٹھنڈا نہیں کر رہا ہے'));
   assert.ok(!faq.isUrduScript('الثلاجة لا تبرد'));
 });
+
+test('an account deletion request (sent from the website\'s deletion page) goes straight to a person', () => {
+  const chatbot = require('../utils/whatsappChatbot');
+  assert.ok(chatbot.isHandoffRequest('I would like to delete my Ahmed Cooling app account.'));
+  assert.ok(chatbot.isHandoffRequest('أرغب في حذف حسابي في تطبيق أحمد للتبريد.'));
+  assert.ok(!chatbot.isHandoffRequest('how much is ac cleaning'));
+});

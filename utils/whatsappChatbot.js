@@ -32,7 +32,7 @@ const BREVO_API_KEY = process.env.BREVO_API_KEY;
 // Keyword-based handoff detection: fast, free, and deterministic for the common ways someone asks for a human,
 // in English, Arabic and Roman Urdu. The model can still ask for a handoff itself (see HANDOFF_MARKER below) for
 // cases this list doesn't catch — complaints, price negotiation, anything it isn't confident answering.
-const HANDOFF_RE = /\b(human|real\s*person|speak\s*to\s*(someone|a\s*person)|talk\s*to\s*(someone|a\s*person|a\s*human|your\s*(team|staff|worker|technician))|customer\s*(service|care)\s*(agent|rep)|representative|agent)\b|(شخص\s*حقيقي|موظف|ممثل|أتكلم\s*مع|اتكلم\s*مع|تحويلي|محول)|(\binsaan\b|\bbanda\b|\bworker\s*se\b|\bkisi\s*insan\b|\breal\s*person\b|\binsan\s*se\s*baat\b)/i;
+const HANDOFF_RE = /\b(human|real\s*person|speak\s*to\s*(someone|a\s*person)|talk\s*to\s*(someone|a\s*person|a\s*human|your\s*(team|staff|worker|technician))|customer\s*(service|care)\s*(agent|rep)|representative|agent)\b|(شخص\s*حقيقي|موظف|ممثل|أتكلم\s*مع|اتكلم\s*مع|تحويلي|محول)|(\binsaan\b|\bbanda\b|\bworker\s*se\b|\bkisi\s*insan\b|\breal\s*person\b|\binsan\s*se\s*baat\b)|\bdelete\s+(my\s+)?(\w+\s+){0,4}account\b|\baccount\s*delete\b|حذف\s*(حسابي|الحساب)/i; // account deletion requests (the website's /delete-account page sends them here) go to a person
 
 const HANDOFF_MARKER = '[[HANDOFF]]';
 
