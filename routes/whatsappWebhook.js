@@ -87,6 +87,7 @@ const handleMessage = async (message, waId, customerName) => {
   const payload = buttonPayload(message);
   const id = interactiveId(message);
   let isText = message.type === 'text' && !!text;
+  let fromVoice = false;
 
   let conversation = await store.logMessage(phone, 'in', text || id || payload || `[${message.type}]`, {
     messageType: (payload || id) ? 'button' : 'text',
@@ -132,12 +133,13 @@ const handleMessage = async (message, waId, customerName) => {
   if (message.type === 'location' && await media.handleLocation(phone, message.location, conversation.language === 'ar')) return;
 
   // A photo goes onto the customer's active booking; a voice note becomes text and is handled like a typed message.
-  if (message.type === 'image' && await media.handleImage(phone, message, conversation.language === 'ar')) return;
+  if (message.type === 'image' && await media.handleImage(phone, message, conversation.language === 'ar', conversation)) return;
   if (message.type === 'audio' || message.type === 'voice') {
-    const heard = await media.transcribe(message);
+    const heard = await media.transcribe(message, { language: conversation.language });
     if (heard) {
       text = heard;
       isText = true;
+      fromVoice = true;
       await store.logMessage(phone, 'in', `🎤 ${heard}`, { messageType: 'text' });
       if (await bookingBot.handleBookingNote(phone, heard)) return;
     }
@@ -161,6 +163,8 @@ const handleMessage = async (message, waId, customerName) => {
     if (!id && await handleInterruption(phone, text, conversation)) return;
     if (await bookingFlow.handleMessage(phone, input, conversation)) return;
   }
+  // A voice note is a conversation, not a menu keyword: the AI answers it (a booking step in progress was handled above)
+  if (fromVoice) { await chatbot.handleIncomingText(phone, text, conversation); return; }
   if (await menu.handle(phone, input, conversation)) return;
   if (isText) await chatbot.handleIncomingText(phone, text, conversation);
 };

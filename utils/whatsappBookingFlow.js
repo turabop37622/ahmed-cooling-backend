@@ -95,7 +95,6 @@ const replyDateList = async (phone, isAr) => {
   const bodyText = L(isAr, 'Great. Pick a date for the visit:', 'ممتاز. اختر تاريخ الزيارة:');
   await sendListMessage(phone, bodyText, L(isAr, 'Choose date', 'اختر التاريخ'), [{ rows }]);
   await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
-  await replyNav(phone, isAr, 'date');
 };
 
 const replyTimeList = async (phone, isAr, date) => {
@@ -108,18 +107,10 @@ const replyTimeList = async (phone, isAr, date) => {
   const bodyText = L(isAr, 'What time suits you?', 'ما الوقت المناسب لك؟');
   await sendListMessage(phone, bodyText, L(isAr, 'Choose time', 'اختر الوقت'), [{ rows }]);
   await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
-  await replyNav(phone, isAr, 'time');
 };
 
-// A list (or location request) can't carry reply buttons itself, so the way out of each step — go back, main menu,
-// change language — follows it as a small second message. The first step has nothing to go back to.
-const replyNav = async (phone, isAr, step) => {
-  const buttons = [];
-  if (step !== 'service') buttons.push({ id: 'nav_back', title: L(isAr, '⬅ Back', '⬅ رجوع') });
-  buttons.push({ id: 'menu_main', title: L(isAr, '☰ Main menu', '☰ القائمة') });
-  buttons.push({ id: 'menu_lang', title: L(isAr, '🌐 Language', '🌐 اللغة') });
-  await replyButtons(phone, L(isAr, 'Need to go back or change something?', 'تريد الرجوع أو التغيير؟'), buttons);
-};
+// No "go back / main menu / language" message after each step any more: customers found a second message after
+// every question noisy. Typing "back", "menu", "cancel" or "change the date" still works at every step.
 
 const replyConfirm = async (phone, d, isAr) => {
   const serviceLabel = isAr ? d.serviceNameAr : d.serviceName;
@@ -135,11 +126,11 @@ const replyConfirm = async (phone, d, isAr) => {
 };
 
 // group = a SERVICE_GROUPS key: the services in it; no group: the list of groups.
-const replyServiceList = async (phone, isAr, groupKey) => {
+const replyServiceList = async (phone, isAr, groupKey, intro) => {
   const group = SERVICE_GROUPS.find((g) => g.key === groupKey);
-  const bodyText = group
+  const bodyText = `${intro ? `${intro}\n\n` : ''}${group
     ? L(isAr, `${group.en}: which service would you like to book?`, `${group.ar}: ما الخدمة التي تريد حجزها؟`)
-    : L(isAr, 'What do you need help with?', 'بماذا نساعدك؟');
+    : L(isAr, 'What do you need help with?', 'بماذا نساعدك؟')}`;
   const rows = group
     ? groupServices(group).map(({ service: s, index }) => ({
       id: `svc_${index}`,
@@ -153,8 +144,6 @@ const replyServiceList = async (phone, isAr, groupKey) => {
     }));
   await sendListMessage(phone, bodyText, group ? L(isAr, 'View services', 'عرض الخدمات') : L(isAr, 'Choose a type', 'اختر النوع'), [{ rows }]);
   await logMessage(phone, 'out', `${bodyText} [list: ${rows.map((r) => r.title).join(', ')}]`, { messageType: 'button', sentBy: 'bot' });
-  // Inside a group there is somewhere to go back to (the groups); on the groups list there is not
-  await replyNav(phone, isAr, group ? 'date' : 'service');
 };
 
 // A real "year-month-day" only if that calendar date actually exists (isIsoDate round-trips it), else null.
@@ -244,13 +233,50 @@ const isArabicFor = (conversation, input) => (conversation?.language
   : conversation?.customerName ? looksArabic(conversation.customerName) : looksArabic(input));
 
 // Begins a fresh booking chat (the menu's "Book a service" button, or a typed booking request).
-const startFlow = async (phone, isAr) => {
+// `opts.service`: a catalogue item already named by the customer ("I would like to book the service: AC Repair") —
+// skip the lists and ask for the date. `opts.intro`: a welcome line on top of the first question.
+const startFlow = async (phone, isAr, opts = {}) => {
   if (!LIST_SERVICES.length) {
     await reply(phone, L(isAr, 'Sorry, bookings aren\'t available right now — please use our app or website.', 'عذراً، الحجز غير متاح الآن — الرجاء استخدام التطبيق أو الموقع.'));
     return;
   }
+  if (opts.service) {
+    const s = opts.service;
+    await setDraft(phone, { step: 'date', serviceId: String(s._id), serviceName: s.name, serviceNameAr: s.nameAr || s.name });
+    if (opts.intro) await reply(phone, opts.intro);
+    await replyDateList(phone, isAr);
+    return;
+  }
   await setDraft(phone, { step: 'service' });
-  await replyServiceList(phone, isAr);
+  await replyServiceList(phone, isAr, undefined, opts.intro);
+};
+
+// The catalogue service a message names word for word (the website/app prefill "...book the service: AC PCB Repair" or
+// "...حجز خدمة (إصلاح لوحة المكيف)"), longest name first so "AC PCB Repair" wins over "AC Repair". null if none.
+const namedService = (text) => {
+  const t = String(text || '').toLowerCase();
+  let best = null;
+  for (const s of catalogueServices) {
+    for (const name of [s.name, s.nameAr]) {
+      if (name && t.includes(name.toLowerCase()) && (!best || name.length > best.len)) best = { s, len: name.length };
+    }
+  }
+  return best ? best.s : null;
+};
+
+// A tap on a service list row after the booking chat was closed or timed out (or from an older message): start the
+// booking right there instead of showing the main menu.
+const startFromTap = async (phone, id, isAr) => {
+  const group = /^cat_(\w+)$/.exec(id);
+  if (group && SERVICE_GROUPS.some((g) => g.key === group[1])) {
+    await setDraft(phone, { step: 'service', group: group[1] });
+    await replyServiceList(phone, isAr, group[1]);
+    return true;
+  }
+  const svc = /^svc_(\d+)$/.exec(id);
+  const item = svc && catalogueServices[Number(svc[1])];
+  if (item) { await startFlow(phone, isAr, { service: item }); return true; }
+  return false;
 };
 
 const handleMessage = async (phone, input, conversation) => {
@@ -299,7 +325,6 @@ const promptStep = async (phone, draft, isAr) => {
     } catch (err) {
       await reply(phone, body);
     }
-    await replyNav(phone, isAr, 'address');
   } else if (draft.step === 'confirm') await replyConfirm(phone, draft, isAr);
 };
 
@@ -314,6 +339,11 @@ const advanceDraft = async (phone, rawInput, draft, isAr) => {
 
   // A tap on an old list/button from an earlier step (or a stale confirm) — just ask the current question again.
   const tappedStep = /^(cat_|svc_)/.test(input) ? 'service' : /^date_/.test(input) ? 'date' : /^time_/.test(input) ? 'time' : /^confirm_/.test(input) ? 'confirm' : null;
+  if (tappedStep === 'service' && draft.step !== 'service' && !draft.rescheduleId) {
+    await setDraft(phone, { step: 'service' });
+    await advanceDraft(phone, input, { step: 'service' }, isAr);
+    return;
+  }
   if (tappedStep && tappedStep !== draft.step) {
     await promptStep(phone, draft, isAr);
     return;
@@ -358,8 +388,7 @@ const advanceDraft = async (phone, rawInput, draft, isAr) => {
     const byName = tapped || !looksLikeAName ? null : faq.findServices(typedNorm)[0];
     const item = tapped ? catalogueServices[Number(tapped[1])] : byName;
     if (!item) {
-      await reply(phone, L(isAr, 'Please pick one from the list above.', 'الرجاء الاختيار من القائمة أعلاه.'));
-      await replyServiceList(phone, isAr, draft.group);
+      await reply(phone, L(isAr, 'Please tap the list above 👆 and choose the service you need.', 'اضغط على القائمة أعلاه 👆 واختر الخدمة التي تحتاجها.'));
       return;
     }
     await setDraft(phone, { step: 'date', serviceId: String(item._id), serviceName: item.name, serviceNameAr: item.nameAr || item.name });
@@ -490,6 +519,9 @@ const createFromDraft = async (phone, draft, isAr) => {
       coordinates: Number.isFinite(draft.latitude) && Number.isFinite(draft.longitude)
         ? { latitude: draft.latitude, longitude: draft.longitude } : undefined,
     });
+    if (Array.isArray(draft.images) && draft.images.length) {
+      await require('../models/Booking').updateOne({ _id: booking._id }, { $push: { images: { $each: draft.images.slice(0, 6) } } });
+    }
 
     await setDraft(phone, null);
     await reply(phone, L(isAr,
@@ -517,7 +549,6 @@ const resume = async (phone, isAr) => {
   const conversation = await draftStatus(phone);
   const draft = conversation?.bookingDraft;
   if (!draft?.step) return;
-  await reply(phone, L(isAr, 'Let\'s continue your booking:', 'لنكمل حجزك:'));
   await promptStep(phone, draft, isAr);
 };
 
@@ -576,4 +607,4 @@ const handleLocation = async (phone, location, conversation) => {
 const DRAFT_TTL_MS = 3 * 60 * 60 * 1000;
 const isDraftStale = (draft) => !draft?.updatedAt || Date.now() - new Date(draft.updatedAt).getTime() > DRAFT_TTL_MS;
 
-module.exports = { handleMessage, startFlow, clearDraft, resume, handleLocation, isDraftStale, startReschedule, looksLikeAnswer, SERVICE_GROUPS, groupServices };
+module.exports = { handleMessage, startFlow, startFromTap, namedService, setDraft, clearDraft, resume, handleLocation, isDraftStale, startReschedule, looksLikeAnswer, SERVICE_GROUPS, groupServices };

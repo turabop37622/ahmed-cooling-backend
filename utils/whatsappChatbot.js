@@ -20,7 +20,11 @@ try { catalogueServices = require('../web/src/lib/services.json'); } catch { cat
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 // The 120b model follows the reply rules far better than the 20b one (tried on real customer messages: the 20b
 // answered an Urdu voice note in Hindi script and got the customer's days wrong).
-const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+// The server may still be configured with the old 20b model: that setting is upgraded too.
+const GROQ_MODEL = !process.env.GROQ_MODEL || process.env.GROQ_MODEL === 'openai/gpt-oss-20b' ? 'openai/gpt-oss-120b' : process.env.GROQ_MODEL;
+// Groq's free tier limits tokens per minute per model: when the main model is busy, the reply comes from this one
+// instead of "Sorry, I couldn't process that".
+const GROQ_FALLBACK_MODEL = process.env.GROQ_FALLBACK_MODEL || 'llama-3.3-70b-versatile';
 const VISIT_CHARGE = (() => {
   const n = Number(process.env.VISIT_CHARGE);
   return Number.isFinite(n) && n >= 0 ? n : 30;
@@ -35,6 +39,7 @@ const BREVO_API_KEY = process.env.BREVO_API_KEY;
 const HANDOFF_RE = /\b(human|real\s*person|speak\s*to\s*(someone|a\s*person)|talk\s*to\s*(someone|a\s*person|a\s*human|your\s*(team|staff|worker|technician))|customer\s*(service|care)\s*(agent|rep)|representative|agent)\b|(شخص\s*حقيقي|موظف|ممثل|أتكلم\s*مع|اتكلم\s*مع|تحويلي|محول)|(\binsaan\b|\bbanda\b|\bworker\s*se\b|\bkisi\s*insan\b|\breal\s*person\b|\binsan\s*se\s*baat\b)|\bdelete\s+(my\s+)?(\w+\s+){0,4}account\b|\baccount\s*delete\b|حذف\s*(حسابي|الحساب)/i; // account deletion requests (the website's /delete-account page sends them here) go to a person
 
 const HANDOFF_MARKER = '[[HANDOFF]]';
+const BOOK_MARKER = '[[BOOK]]';
 
 // Written from what real customers asked on WhatsApp (Oct-Nov 2026): replies were too formal, ignored a booking the
 // customer already had, answered a Pakistani voice note in Hindi script, refused to give a number, and told an Arabic
@@ -51,24 +56,26 @@ How to talk:
 - Answer what they actually asked first, then (only if it fits) one next step.
 - Use what was already said in this chat; never ask again for something the customer told you.
 - Language: you may ONLY write in English, Arabic or Roman Urdu — never any other language or script. Reply in the one that matches the customer's last message: Arabic (Saudi-friendly, simple), English, or Roman Urdu (Urdu in Latin letters, e.g. "Ji bilkul, hamara technician aap ke ghar aa kar check karega."). A message in Hindi/Devanagari letters or in Urdu script is from an Urdu speaker: reply in Roman Urdu. A message in any other language (French, Bengali, Indonesian, Tagalog, ...): reply in English.
-- Three buttons are shown under your message automatically: "Book a service", "Main menu", "Talk to our team" (Arabic: «حجز خدمة»، «القائمة الرئيسية»، «تحدث مع فريقنا»). NEVER list or repeat the buttons in your text. When you suggest one, name only that one, exactly as it is shown (see the last line below), in a sentence of the customer's own language. Never tell them to type "menu" or "I want to book a service".
+- No buttons are shown under your reply, except this one: when you invite the customer to book a technician, end your reply with the exact text ${BOOK_MARKER} on its own and a "Book a service" button appears under it. Add it ONLY when you have just told them what the technician will do or the starting price, or they said they want a visit — never when your reply asks them a question, and never twice in a row. Never list menus or options, and never tell them to type "menu" or "I want to book a service".
+- Never paste our whole list of services and prices. Mention only the service and starting price that fit what they asked.
 - Plain text only: no HTML, no <br>, no brackets.
 - Do not start with "I'm sorry, but I can't…". Say what we CAN do.
-- Voice notes reach you as rough speech-to-text: if it is unclear, guess the sensible meaning or ask one short question — do not answer a sentence you do not understand.
+- Voice notes reach you as rough speech-to-text, often garbled (an Urdu or Punjabi voice note may come out as strange English or Hindi). Work out the most likely meaning for an AC / appliance repair customer (e.g. "outdoor" = the AC outdoor unit, "pipe" = AC copper piping). If you really cannot tell, ask one short, kind question. Never answer a sentence you do not understand with a price list.
 
 Facts you can rely on:
 - We are a home service: the technician comes to the customer's home or office anywhere in Jeddah or Makkah. If they ask for our location, say there is no need to bring anything to us because the technician comes to them — book and share their location. Do not say whether we have a shop or office.
-- Areas: Jeddah and Makkah only.
+- Areas: Jeddah and Makkah only. A district name is inside one of them: Al Ruwais, Al Hamra, Al Rawdah, Al Safa, Al Marwah, Al Naeem, Al Faisaliyah, Al Aziziyah, Al Sharafiyah, Al Balad, Obhur, Al Salamah, Al Zahra, Al Rehab, Al Samer, Al Naseem, Al Baghdadiyah are in Jeddah; Al Awali, Al Shoqiyah, Al Aziziyah (Makkah), Al Nawariyah, Al Kakiyah are in Makkah. Never tell a customer in such a district that we do not serve them.
+- If the customer wants to bring the appliance to us instead of a home visit, say kindly that our team will tell them where, and hand over (see the rules).
 - Visit fee SAR ${VISIT_CHARGE} on top of the service price; the customer pays only after the work is done. Final price is confirmed after inspection; spare parts are extra.
-- Our WhatsApp number is +966 54 448 3745 (this chat). A technician's own number is not shared in advance: the assigned technician calls the customer before coming. If they want to speak to someone now, offer the "Talk to our team" button. Never just say "I can't provide a number".
+- Our WhatsApp number is +966 54 448 3745 (this chat). A technician's own number is not shared in advance: the assigned technician calls the customer before coming. If they want to speak to someone now, say a team member will reply right here and hand over (see the rules). Never just say "I can't provide a number".
 - Emergency support runs 24/7.
-- Booking: the "Book a service" button below starts a short step-by-step booking (service, date, time, address). They can also book in the Ahmed Cooling app or website. You cannot create or change a booking yourself.
+- Booking: the "Book a service" button (see above) starts a short step-by-step booking (service, date, time, address). They can also book in the Ahmed Cooling app or website. You cannot create or change a booking yourself.
 - Problems ("AC not cooling", "microwave trips the power"): acknowledge it kindly, ask ONE short question if needed, say what the technician will check and the starting price of the matching service, then suggest booking. Keep the appliance they are talking about — "it trips the electricity" about a microwave is a microwave problem, not wiring. Never give do-it-yourself electrical or gas repair steps.
 - Services (starting prices, final after inspection):
 ${lines}
 ${bookingContext}
 Rules:
-- NEVER say how long a service takes, how soon a technician will arrive, or mention any warranty or guarantee. If asked, say our team confirms that for their case, and offer "Talk to our team".
+- NEVER say how long a service takes, how soon a technician will arrive, or mention any warranty or guarantee. If asked, say our team confirms that for their case, and hand over (see the rules).
 - Never invent a price, address, discount or policy that is not listed above.
 - If they are upset, want a discount, complain about a technician, want to change/reschedule/cancel an existing booking or give a day/time that suits them, or ask something you are not sure about: answer kindly that our team will arrange it with them here, and end your reply with the exact text ${HANDOFF_MARKER} on its own.`;
 };
@@ -137,25 +144,30 @@ const callGroq = async (phone, userText, language, isAr, extraHint = '') => {
   const romanUrduHint = speaksUrdu(userText)
     ? '\nThe customer\'s last message is Urdu/Hindi (Roman Urdu, Urdu script, or a voice note written in Hindi letters): you MUST reply in Roman Urdu (Urdu in Latin letters, e.g. "Aap ka fridge kab se thanda nahi kar raha?"), not in English, Hindi or Urdu script.'
     : '';
-  // The buttons go out in Arabic or English only (a Roman Urdu reply gets the English ones): name them as shown.
+  // The one possible button goes out in Arabic or English only (a Roman Urdu reply gets the English one).
   const buttonHint = isAr
-    ? '\nThe buttons under this reply are in Arabic: «حجز خدمة»، «القائمة الرئيسية»، «تحدث مع فريقنا».'
-    : '\nThe buttons under this reply are in English: "Book a service", "Main menu", "Talk to our team" — use these English names even in a Roman Urdu reply.';
+    ? '\nIf you add the booking button, it reads «حجز خدمة».'
+    : '\nIf you add the booking button, it reads "Book a service" (in English, even under a Roman Urdu reply).';
+  // English letters that are not Urdu: an English reply (a Latin-script district name like 'Al Ruwais' is not Arabic)
+  const englishHint = !isAr && !speaksUrdu(userText) && /[a-z]/i.test(userText) && !/[؀-ۿ]/.test(userText)
+    ? '\nThe customer\'s last message is in English letters: reply in English.'
+    : '';
   const bookingContext = await loadBookingContext(phone);
-  const request = () => axios.post(
+  const request = (model) => axios.post(
     'https://api.groq.com/openai/v1/chat/completions',
     {
-      model: GROQ_MODEL,
-      messages: [{ role: 'system', content: SYSTEM_PROMPT(bookingContext) + langHint + romanUrduHint + buttonHint + extraHint }, ...history, { role: 'user', content: userText }],
+      model,
+      messages: [{ role: 'system', content: SYSTEM_PROMPT(bookingContext) + langHint + romanUrduHint + englishHint + buttonHint + extraHint }, ...history, { role: 'user', content: userText }],
       // gpt-oss spends part of the budget on its own reasoning: keep that short and leave room for the whole answer
-      reasoning_effort: 'low',
+      ...(/gpt-oss/.test(model) ? { reasoning_effort: 'low' } : {}),
       max_tokens: 1200,
     },
     { headers: { Authorization: `Bearer ${GROQ_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
   );
+  // 1st try: the main model; a rate limit or server error: the fallback model (it has its own Groq quota)
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      const { data } = await request();
+      const { data } = await request(attempt === 1 ? GROQ_MODEL : GROQ_FALLBACK_MODEL);
       const text = (data.choices?.[0]?.message?.content || '').trim();
       return text || null;
     } catch (err) {
@@ -163,7 +175,7 @@ const callGroq = async (phone, userText, language, isAr, extraHint = '') => {
       const retryable = !status || status === 429 || status >= 500;
       console.error(`❌ Groq WhatsApp reply failed (attempt ${attempt}):`, err.response?.data || err.message);
       if (!retryable || attempt === 2) return null;
-      await sleep(900);
+      await sleep(300);
     }
   }
   return null;
@@ -279,19 +291,16 @@ const handleIncomingText = async (phone, text, conversation) => {
   }
 
   const handoff = reply.includes(HANDOFF_MARKER);
-  const cleanReply = reply.replace(HANDOFF_MARKER, '').trim() || HANDOFF_ACK(isAr, ur);
+  const offerBooking = reply.includes(BOOK_MARKER);
+  const cleanReply = reply.split(HANDOFF_MARKER).join('').split(BOOK_MARKER).join('').trim() || HANDOFF_ACK(isAr, ur);
 
-  if (handoff || cleanReply.length > 1000) {
-    await sendTextMessage(phone, cleanReply);
-    await logMessage(phone, 'out', cleanReply, { messageType: 'text', sentBy: 'bot' });
+  // A plain reply like a person's; a single "Book a service" button only when the AI invited the customer to book
+  if (offerBooking && !handoff && cleanReply.length <= 1000) {
+    const buttons = [{ id: 'menu_book', title: isAr ? 'حجز خدمة' : 'Book a service' }];
+    try { await sendButtonsMessage(phone, cleanReply, buttons); } catch { await sendTextMessage(phone, cleanReply); }
+    await logMessage(phone, 'out', `${cleanReply} [${buttons[0].title}]`, { messageType: 'button', sentBy: 'bot' });
   } else {
-    // The answer and the way forward in one message: book, back to the menu, or a person
-    const buttons = [
-      { id: 'menu_book', title: isAr ? 'حجز خدمة' : 'Book a service' },
-      { id: 'menu_main', title: isAr ? 'القائمة الرئيسية' : 'Main menu' },
-      { id: 'menu_human', title: isAr ? 'تحدث مع فريقنا' : 'Talk to our team' },
-    ];
-    await sendButtonsMessage(phone, cleanReply, buttons);
+    await sendTextMessage(phone, cleanReply);
     await logMessage(phone, 'out', cleanReply, { messageType: 'text', sentBy: 'bot' });
   }
 

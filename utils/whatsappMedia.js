@@ -11,7 +11,12 @@ const { phoneVariants } = require('./phone');
 const API_VERSION = process.env.WHATSAPP_API_VERSION || 'v21.0';
 const ACCESS_TOKEN = process.env.WHATSAPP_CLOUD_API_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const WHISPER_MODEL = process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3-turbo';
+// The full model: the turbo one turned Urdu and Punjabi voice notes into nonsense English
+const WHISPER_MODEL = process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3';
+// Context for the speech-to-text: what the business is and the words customers use, so it spells them right
+const WHISPER_PROMPT = 'Customer voice message to Ahmed Cooling Workshop, an AC and home appliance repair service in Jeddah and Makkah. '
+  + 'AC, split AC, outdoor unit, compressor, gas, PCB, fridge, washing machine. مكيف، ثلاجة، غسالة، جدة، مكة. '
+  + 'Aap ka AC theek karna hai, technician bhej dein.';
 const MAX_BYTES = 10 * 1024 * 1024;
 const MAX_PHOTOS_PER_BOOKING = 6;
 const ACTIVE = ['pending', 'confirmed', 'assigned', 'on_the_way', 'in_progress'];
@@ -42,15 +47,30 @@ const reply = async (phone, body, buttons) => {
 };
 
 // A photo. Returns true when handled; false lets the caller say photos cannot be read here.
-const handleImage = async (phone, message, isAr) => {
+const handleImage = async (phone, message, isAr, conversation) => {
   const mediaId = message.image && message.image.id;
   if (!mediaId || !cloudinaryReady() || !ACCESS_TOKEN) return false;
   const booking = await Booking.findOne({ phone: { $in: phoneVariants(phone) }, status: { $in: ACTIVE }, deletedAt: null }).sort({ createdAt: -1 });
-  const menu = [{ id: 'menu_book', title: L(isAr, 'Book a service', 'حجز خدمة') }, { id: 'menu_human', title: L(isAr, 'Talk to our team', 'تحدث مع فريقنا') }];
   if (!booking) {
+    // In the middle of the WhatsApp booking chat: keep the photo, it is added to the booking once it is made
+    const draft = conversation && conversation.bookingDraft;
+    if (draft && draft.step) {
+      try {
+        const { buffer } = await downloadMedia(mediaId);
+        const result = await uploadPhoto(buffer, 'whatsapp-bookings');
+        const images = [...(draft.images || []), result.secure_url].slice(0, MAX_PHOTOS_PER_BOOKING);
+        await require('./whatsappBookingFlow').setDraft(phone, { ...draft, images });
+        await reply(phone, L(isAr, 'Got the photo 👍 It will be added to your booking for the technician.', 'وصلت الصورة 👍 ستُضاف إلى حجزك ليراها الفني.'));
+      } catch (err) {
+        console.error('❌ WhatsApp photo (booking chat) failed:', err.response?.data?.error?.message || err.message);
+        await reply(phone, L(isAr, 'Sorry, I could not save that photo — please send it again.', 'عذراً، تعذر حفظ الصورة — أرسلها مرة أخرى من فضلك.'));
+      }
+      return true;
+    }
     await reply(phone, L(isAr,
-      'Thanks for the photo! You have no active booking yet — book a service first, then send the photo again and we will attach it for the technician.',
-      'شكراً على الصورة! ليس لديك حجز نشط بعد — احجز خدمة أولاً ثم أرسل الصورة مرة أخرى لنرفقها للفني.'), menu);
+      'Thanks for the photo 👍 What seems to be the problem? Tell me a little and I can book a technician for you.',
+      'شكراً على الصورة 👍 ما المشكلة بالضبط؟ أخبرني باختصار وأحجز لك زيارة فني.'),
+    [{ id: 'menu_book', title: L(isAr, 'Book a service', 'حجز خدمة') }]);
     return true;
   }
   if ((booking.images || []).length >= MAX_PHOTOS_PER_BOOKING) {
@@ -95,8 +115,9 @@ const handleLocation = async (phone, location, isAr) => {
   return true;
 };
 
-// A voice note -> text, or null if it cannot be transcribed.
-const transcribe = async (message) => {
+// A voice note -> text, or null if it cannot be transcribed. `language`: 'ar' for an Arabic chat (Whisper then never
+// mistakes it for another language); anything else is left to Whisper to detect.
+const transcribe = async (message, { language } = {}) => {
   const audio = message.audio || message.voice;
   if (!audio || !audio.id || !GROQ_API_KEY || !ACCESS_TOKEN) return null;
   try {
@@ -105,6 +126,8 @@ const transcribe = async (message) => {
     form.append('file', new Blob([buffer], { type: mime }), 'voice.ogg');
     form.append('model', WHISPER_MODEL);
     form.append('response_format', 'json');
+    form.append('prompt', WHISPER_PROMPT);
+    if (language === 'ar') form.append('language', 'ar');
     const { data } = await axios.post('https://api.groq.com/openai/v1/audio/transcriptions', form, {
       headers: { Authorization: `Bearer ${GROQ_API_KEY}` }, timeout: 30000, maxBodyLength: MAX_BYTES,
     });

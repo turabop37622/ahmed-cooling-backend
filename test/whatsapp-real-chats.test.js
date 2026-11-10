@@ -182,3 +182,99 @@ test('an account deletion request (sent from the website\'s deletion page) goes 
   assert.ok(chatbot.isHandoffRequest('أرغب في حذف حسابي في تطبيق أحمد للتبريد.'));
   assert.ok(!chatbot.isHandoffRequest('how much is ac cleaning'));
 });
+
+// ---- Nov 2-9 chats: less menu noise, booking requests start the booking, AI replies without three buttons ----
+const withFlowStubs = async (fn) => {
+  const cloud = require('../utils/whatsappCloud');
+  const store = require('../utils/whatsappConversationStore');
+  const saved = {
+    list: cloud.sendListMessage, buttons: cloud.sendButtonsMessage, text: cloud.sendTextMessage,
+    log: store.logMessage, lang: store.setLanguage, conv: WhatsAppConversation.findOneAndUpdate,
+  };
+  const sent = []; const drafts = [];
+  cloud.sendListMessage = async (to, body) => { sent.push({ kind: 'list', body }); };
+  cloud.sendButtonsMessage = async (to, body, buttons) => { sent.push({ kind: 'buttons', body, buttons }); };
+  cloud.sendTextMessage = async (to, body) => { sent.push({ kind: 'text', body }); };
+  store.logMessage = async () => {};
+  store.setLanguage = async () => {};
+  WhatsAppConversation.findOneAndUpdate = async (q, u) => { if (u && u.$set && u.$set.bookingDraft) drafts.push(u.$set.bookingDraft); return {}; };
+  for (const m of ['../utils/whatsappMenu', '../utils/whatsappBookingFlow']) delete require.cache[require.resolve(m)];
+  try {
+    await fn(require('../utils/whatsappMenu'), sent, drafts);
+  } finally {
+    cloud.sendListMessage = saved.list; cloud.sendButtonsMessage = saved.buttons; cloud.sendTextMessage = saved.text;
+    store.logMessage = saved.log; store.setLanguage = saved.lang; WhatsAppConversation.findOneAndUpdate = saved.conv;
+    for (const m of ['../utils/whatsappMenu', '../utils/whatsappBookingFlow']) delete require.cache[require.resolve(m)];
+  }
+};
+
+test('the website\'s prefilled "book a visit" message starts the booking, not a price list', async () => {
+  await withFlowStubs(async (menu, sent, drafts) => {
+    const handled = await menu.handle('966500000006', 'Hello Ahmed Cooling Workshop! I would like to inquire about repair services and book a visit in Jeddah / Makkah.', { language: 'en' });
+    assert.equal(handled, true);
+    assert.equal(drafts[0].step, 'service');
+    assert.equal(sent.length, 1, 'one message: the service list, no extra navigation message');
+    assert.equal(sent[0].kind, 'list');
+    assert.match(sent[0].body, /Welcome to Ahmed Cooling Workshop/);
+    assert.doesNotMatch(sent[0].body, /SAR/);
+  });
+});
+
+test('a message naming a service ("حجز خدمة (إصلاح لوحة المكيف)") goes straight to the date', async () => {
+  await withFlowStubs(async (menu, sent, drafts) => {
+    await menu.handle('966500000007', 'السلام عليكم، أود الاستفسار وحجز خدمة (إصلاح لوحة المكيف) من ورشة أحمد للتبريد.', { language: 'ar' });
+    assert.equal(drafts[0].step, 'date');
+    assert.equal(drafts[0].serviceName, 'AC PCB Repair');
+    assert.ok(sent.some((m) => m.kind === 'list' && /تاريخ/.test(m.body)));
+    assert.ok(!sent.some((m) => /تريد الرجوع|Need to go back/.test(m.body)), 'no navigation message');
+  });
+});
+
+test('a tap on an old service list books that service instead of showing the menu', async () => {
+  await withFlowStubs(async (menu, sent, drafts) => {
+    const idx = require('../web/src/lib/services.json').findIndex((s) => s.name === 'AC Repair');
+    await menu.handle('966500000008', `svc_${idx}`, { language: 'en' });
+    assert.equal(drafts[0].step, 'date');
+    assert.equal(drafts[0].serviceName, 'AC Repair');
+  });
+});
+
+test('a long message that only mentions "services" goes to the AI, not the canned price list', async () => {
+  await withFlowStubs(async (menu) => {
+    const handled = await menu.handle('966500000009', 'my brother i have an outdoor unit on the roof and the pipe is leaking what services can you do for this', { language: 'en' });
+    assert.equal(handled, false);
+  });
+});
+
+test('an AI reply is plain text; a single "Book a service" button only when the AI asks for it', async () => {
+  const axios = require('axios');
+  const saved = {
+    key: process.env.GROQ_API_KEY, post: axios.post, buttons: whatsappCloud.sendButtonsMessage, text: whatsappCloud.sendTextMessage,
+    find: WhatsAppMessage.find, create: WhatsAppMessage.create, bfind: Booking.find, conv: WhatsAppConversation.findOneAndUpdate,
+  };
+  process.env.GROQ_API_KEY = 'test-key';
+  delete require.cache[require.resolve('../utils/whatsappChatbot')];
+  const answers = ['Sure! Which part of Jeddah are you in?', 'Our technician can check it at home, from SAR 150.\n[[BOOK]]'];
+  const sent = [];
+  axios.post = async () => ({ data: { choices: [{ message: { content: answers.shift() } }] } });
+  whatsappCloud.sendButtonsMessage = async (to, body, buttons) => { sent.push({ body, buttons }); };
+  whatsappCloud.sendTextMessage = async (to, body) => { sent.push({ body }); };
+  WhatsAppMessage.find = () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) });
+  WhatsAppMessage.create = async () => ({});
+  Booking.find = () => ({ sort: () => ({ limit: () => ({ select: () => ({ lean: async () => [] }) }) }) });
+  WhatsAppConversation.findOneAndUpdate = async () => ({});
+  try {
+    const chatbot = require('../utils/whatsappChatbot');
+    await chatbot.handleIncomingText('+966500000010', 'my ac is not cooling', { status: 'bot', language: 'en' });
+    await chatbot.handleIncomingText('+966500000010', 'in al ruwais', { status: 'bot', language: 'en' });
+    assert.equal(sent[0].buttons, undefined);
+    assert.deepEqual(sent[1].buttons.map((b) => b.title), ['Book a service']);
+    assert.doesNotMatch(sent[1].body, /\[\[BOOK\]\]/);
+  } finally {
+    if (saved.key === undefined) delete process.env.GROQ_API_KEY; else process.env.GROQ_API_KEY = saved.key;
+    axios.post = saved.post; whatsappCloud.sendButtonsMessage = saved.buttons; whatsappCloud.sendTextMessage = saved.text;
+    WhatsAppMessage.find = saved.find; WhatsAppMessage.create = saved.create; Booking.find = saved.bfind;
+    WhatsAppConversation.findOneAndUpdate = saved.conv;
+    delete require.cache[require.resolve('../utils/whatsappChatbot')];
+  }
+});

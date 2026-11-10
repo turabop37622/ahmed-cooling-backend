@@ -79,10 +79,10 @@ const sendMainMenu = async (phone, lang, intro) => {
   await logMessage(phone, 'out', `${body} [menu]`, { messageType: 'button', sentBy: 'bot' });
 };
 
+// One button, not three: customers found "Book / Main menu / Talk to our team" under every answer noisy.
+// "menu" and "talk to your team" can always be typed.
 const followUp = (lang) => [
   { id: 'menu_book', title: L(lang, 'Book a service', 'حجز خدمة') },
-  { id: 'menu_main', title: L(lang, 'Main menu', 'القائمة الرئيسية') },
-  { id: 'menu_human', title: L(lang, 'Talk to our team', 'تحدث مع فريقنا') },
 ];
 
 // An answer, followed by the three things a customer most likely wants next.
@@ -134,6 +134,9 @@ const handleMenuId = async (phone, id, conversation, lang) => {
   }
 };
 
+// A request to book, in the words customers use and in the website's prefilled "I would like to book the service: …"
+const BOOK_REQUEST_RE = /\b(book|booking|appointment|schedule a visit)\b|حجز|احجز|موعد|booking\s*kar|book\s*kar/i;
+
 const GENERIC_HANDLED = ['other_area', 'tech_contact', 'our_location', 'areas', 'hours', 'payment', 'visit_fee', 'warranty', 'arrival', 'how_to_book', 'cancel_change', 'contact'];
 // The canned answers that also have a Roman Urdu text (utils/whatsappFaq.js); other Roman Urdu questions go to the AI.
 const ROMAN_URDU_HANDLED = ['other_area', 'tech_contact', 'our_location', 'areas', 'contact'];
@@ -181,7 +184,9 @@ const handle = async (phone, input, conversation) => {
   if (conversation) conversation.language = lang;
 
   if (input.startsWith('menu_')) return handleMenuId(phone, input, conversation, lang);
-  if (/^(cat_|svc_|date_|time_|confirm_|nav_|lang_)/.test(input)) { await sendMainMenu(phone, lang); return true; } // a stale tap
+  // An old service-list tap: book that service / open that group; other stale taps just show the menu
+  if (/^(cat_|svc_)/.test(input) && await bookingFlow.startFromTap(phone, input, lang === 'ar')) return true;
+  if (/^(cat_|svc_|date_|time_|confirm_|nav_|lang_)/.test(input)) { await sendMainMenu(phone, lang); return true; }
 
   const norm = faq.normalize(input);
   if (!norm) return false;
@@ -209,6 +214,19 @@ const handle = async (phone, input, conversation) => {
 
   const intent = faq.matchIntent(norm);
   const services = faq.findServices(norm);
+  const short = faq.tokensOf(norm).length <= 8;
+
+  // "I would like to book ..." (also the message the website and app prefill): start the booking at once — with the
+  // service already chosen when the message names one — instead of a price list or a contact card.
+  if (BOOK_REQUEST_RE.test(input) && intent !== 'cancel_change' && intent !== 'status') {
+    const named = bookingFlow.namedService(input);
+    const salaam = /سلام|salam|assalam/i.test(input);
+    const intro = L(lang,
+      `${salaam ? 'Wa alaikum assalam' : 'Hello'} 👋 Welcome to Ahmed Cooling Workshop!${named ? ` Let's book your ${named.name}.` : ''}`,
+      `${salaam ? 'وعليكم السلام ورحمة الله' : 'أهلاً وسهلاً'} 👋 مرحباً بكم في ورشة أحمد للتبريد!${named ? ` لنحجز لك: ${named.nameAr || named.name}.` : ''}`);
+    await bookingFlow.startFlow(phone, lang === 'ar', { service: named || undefined, intro });
+    return true;
+  }
 
   // Roman Urdu: the tayyar answers below are English / Arabic, so apart from a booking lookup or starting a booking
   // (which have their own buttons) the AI answers, in Roman Urdu.
@@ -220,6 +238,7 @@ const handle = async (phone, input, conversation) => {
   }
 
   if (intent === 'status') { await bookingStatusReply(phone, lang); return true; }
+  if (!short) return false;
   if (intent === 'prices' || intent === 'services_overview' || (intent === 'warranty' && services.length)) {
     await answer(phone, lang, services.length ? faq.serviceReply(services, lang) : faq.servicesOverview(lang));
     return true;
