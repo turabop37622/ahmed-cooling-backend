@@ -278,3 +278,83 @@ test('an AI reply is plain text; a single "Book a service" button only when the 
     delete require.cache[require.resolve('../utils/whatsappChatbot')];
   }
 });
+
+// ---- Nov 15: job requests, and a problem described during the booking ----
+test('job requests are recognised in English, Roman Urdu and Arabic; a customer asking for a technician is not one', () => {
+  const jobs = require('../utils/whatsappJobs');
+  for (const t of ['I need a job', 'Any vacancy for AC technician?', 'mujhe kaam chahiye', 'naukri hai?', 'أبحث عن وظيفة', 'ابغى شغل عندكم']) {
+    assert.ok(jobs.isJobRequest(t), t);
+  }
+  for (const t of ['I need a technician for my AC', 'my ac is not working', 'book a service', 'محتاج فني تكييف']) {
+    assert.ok(!jobs.isJobRequest(t), t);
+  }
+});
+
+// In-memory JobLead with the few calls the job flow makes
+const withJobStubs = async (fn) => {
+  const JobLead = require('../models/JobLead');
+  const cloud = require('../utils/whatsappCloud');
+  const store = require('../utils/whatsappConversationStore');
+  const leads = [];
+  const saved = { find: JobLead.findOne, create: JobLead.create, text: cloud.sendTextMessage, list: cloud.sendListMessage, buttons: cloud.sendButtonsMessage, log: store.logMessage };
+  const wrap = (doc) => Object.assign(doc, { save: async () => doc });
+  JobLead.findOne = (q) => ({ sort: async () => leads.filter((l) => (!q.phone || l.phone === q.phone) && (!q.status || (q.status.$in ? q.status.$in.includes(l.status) : l.status === q.status))).pop() || null });
+  JobLead.create = async (d) => { const doc = wrap({ _id: `lead${leads.length}`, skills: [], cities: [], ...d }); leads.push(doc); return doc; };
+  const sent = [];
+  cloud.sendTextMessage = async (to, body) => { sent.push(body); };
+  cloud.sendListMessage = async (to, body) => { sent.push(body); };
+  cloud.sendButtonsMessage = async (to, body) => { sent.push(body); };
+  store.logMessage = async () => {};
+  delete require.cache[require.resolve('../utils/whatsappJobs')];
+  try {
+    await fn(require('../utils/whatsappJobs'), leads, sent);
+  } finally {
+    JobLead.findOne = saved.find; JobLead.create = saved.create; cloud.sendTextMessage = saved.text; cloud.sendListMessage = saved.list;
+    cloud.sendButtonsMessage = saved.buttons; store.logMessage = saved.log;
+    delete require.cache[require.resolve('../utils/whatsappJobs')];
+  }
+};
+
+test('a job request asks for the Iqama first; after the admin\'s "ask for details" the bot collects name, skill, city, experience', async () => {
+  await withJobStubs(async (jobs, leads, sent) => {
+    await jobs.start('+966500000011', { isAr: false, customerName: 'Ali' });
+    assert.equal(leads[0].status, 'awaiting_iqama');
+    assert.match(sent[0], /photo of your Iqama/);
+
+    leads[0].status = 'iqama_review'; // the photo arrived and the admin checked it
+    await jobs.askForDetails(leads[0]);
+    assert.equal(leads[0].status, 'awaiting_details');
+    assert.equal(leads[0].detailsStep, 'name');
+
+    assert.equal(await jobs.handleReply('+966500000011', 'Ali Raza Khan'), true);
+    assert.equal(await jobs.handleReply('+966500000011', 'job_skill_ac'), true);
+    assert.equal(await jobs.handleReply('+966500000011', 'job_city_both'), true);
+    assert.equal(await jobs.handleReply('+966500000011', '7 saal'), true);
+    assert.equal(leads[0].status, 'details_received');
+    assert.equal(leads[0].fullName, 'Ali Raza Khan');
+    assert.deepEqual(leads[0].skills, ['ac']);
+    assert.deepEqual(leads[0].cities, ['jeddah', 'makkah']);
+    assert.equal(leads[0].experienceYears, 7);
+    assert.match(sent[sent.length - 1], /all your details/);
+  });
+});
+
+test('while the Iqama is awaited, an unrelated message is a normal chat (not swallowed)', async () => {
+  await withJobStubs(async (jobs) => {
+    await jobs.start('+966500000012', { isAr: false });
+    assert.equal(await jobs.handleReply('+966500000012', 'how much is ac cleaning'), false);
+    assert.equal(await jobs.handleReply('+966500000012', 'I need a job'), true);
+  });
+});
+
+test('describing the fault while the date is asked keeps it for the technician and does not send the date list again', async () => {
+  await withFlowStubs(async (menu, sent, drafts) => {
+    const flow = require('../utils/whatsappBookingFlow');
+    await flow.addProblemNote('+966500000013', { step: 'date', serviceName: 'AC Repair' }, 'the AC is not cooling and makes a loud noise', false);
+    assert.equal(drafts[0].problem, 'the AC is not cooling and makes a loud noise');
+    assert.equal(drafts[0].step, 'date');
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].kind, 'text');
+    assert.match(sent[0].body, /noted this for the technician/);
+  });
+});

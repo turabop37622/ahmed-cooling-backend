@@ -522,6 +522,9 @@ const createFromDraft = async (phone, draft, isAr) => {
     if (Array.isArray(draft.images) && draft.images.length) {
       await require('../models/Booking').updateOne({ _id: booking._id }, { $push: { images: { $each: draft.images.slice(0, 6) } } });
     }
+    if (draft.problem) {
+      await require('../models/Booking').updateOne({ _id: booking._id }, { $set: { problemDescription: draft.problem } });
+    }
 
     await setDraft(phone, null);
     await reply(phone, L(isAr,
@@ -538,6 +541,24 @@ const createFromDraft = async (phone, draft, isAr) => {
 
 const clearDraft = (phone) => setDraft(phone, null);
 
+// What a step is waiting for, in one short line (the list itself is already right above in the chat).
+const stepNudge = (step, isAr) => ({
+  service: L(isAr, 'Tap the list above 👆 and choose the service.', 'اضغط على القائمة أعلاه 👆 واختر الخدمة.'),
+  date: L(isAr, 'Now just pick the date from the list above 👆', 'الآن اختر التاريخ من القائمة أعلاه 👆'),
+  time: L(isAr, 'Now just pick the time from the list above 👆', 'الآن اختر الوقت من القائمة أعلاه 👆'),
+  address: L(isAr, 'Now send your location 📍 or type your address (area, street, building).', 'الآن أرسل موقعك 📍 أو اكتب العنوان (الحي والشارع والمبنى).'),
+  confirm: L(isAr, 'Please confirm the booking with the buttons above 👆', 'من فضلك أكّد الحجز بالأزرار أعلاه 👆'),
+}[step] || '');
+
+// The customer described the fault while we were asking for the date/time: keep it for the technician (it becomes the
+// booking's problem description) and point back to the open question.
+const addProblemNote = async (phone, draft, text, isAr) => {
+  const note = String(text || '').trim().slice(0, 500);
+  const problem = [draft.problem, note].filter(Boolean).join('\n').slice(0, 1000);
+  await setDraft(phone, { ...draft, problem });
+  await reply(phone, `${L(isAr, 'Got it 👍 I\'ve noted this for the technician.', 'تمام 👍 سجّلت هذا للفني.')} ${stepNudge(draft.step, isAr)}`);
+};
+
 // Choosing a new date and time for an existing booking: the usual date and time lists, then utils/whatsappManage.js applies it.
 const startReschedule = async (phone, booking, isAr) => {
   await setDraft(phone, { step: 'date', rescheduleId: String(booking._id) });
@@ -549,7 +570,8 @@ const resume = async (phone, isAr) => {
   const conversation = await draftStatus(phone);
   const draft = conversation?.bookingDraft;
   if (!draft?.step) return;
-  await promptStep(phone, draft, isAr);
+  if (draft.step === 'confirm') { await promptStep(phone, draft, isAr); return; }
+  await reply(phone, stepNudge(draft.step, isAr));
 };
 
 // Greater Jeddah / Makkah bounding boxes — used when a shared pin can't be named by the geocoder.
@@ -607,4 +629,4 @@ const handleLocation = async (phone, location, conversation) => {
 const DRAFT_TTL_MS = 3 * 60 * 60 * 1000;
 const isDraftStale = (draft) => !draft?.updatedAt || Date.now() - new Date(draft.updatedAt).getTime() > DRAFT_TTL_MS;
 
-module.exports = { handleMessage, startFlow, startFromTap, namedService, setDraft, clearDraft, resume, handleLocation, isDraftStale, startReschedule, looksLikeAnswer, SERVICE_GROUPS, groupServices };
+module.exports = { handleMessage, startFlow, startFromTap, namedService, addProblemNote, setDraft, clearDraft, resume, handleLocation, isDraftStale, startReschedule, looksLikeAnswer, SERVICE_GROUPS, groupServices };

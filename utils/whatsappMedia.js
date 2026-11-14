@@ -139,4 +139,4 @@ const transcribe = async (message, { language } = {}) => {
   }
 };
 
-module.exports = { handleImage, handleLocation, transcribe };
+module.exports = { handleImage, handleLocation, transcribe, downloadMedia, cloudinaryReady };

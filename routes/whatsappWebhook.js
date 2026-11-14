@@ -14,6 +14,7 @@ const bookingBot = require('../utils/whatsappBookingBot');
 const bookingFlow = require('../utils/whatsappBookingFlow');
 const media = require('../utils/whatsappMedia');
 const chatbot = require('../utils/whatsappChatbot');
+const jobs = require('../utils/whatsappJobs');
 const menu = require('../utils/whatsappMenu');
 const faq = require('../utils/whatsappFaq');
 const store = require('../utils/whatsappConversationStore');
@@ -132,7 +133,8 @@ const handleMessage = async (message, waId, customerName) => {
   // A pin sent outside the booking chat (e.g. after the confirmation message) goes onto their open booking.
   if (message.type === 'location' && await media.handleLocation(phone, message.location, conversation.language === 'ar')) return;
 
-  // A photo goes onto the customer's active booking; a voice note becomes text and is handled like a typed message.
+  // A photo: the Iqama of someone asking for a job, else onto the customer's booking. A voice note becomes text.
+  if (message.type === 'image' && await jobs.handleImage(phone, message)) return;
   if (message.type === 'image' && await media.handleImage(phone, message, conversation.language === 'ar', conversation)) return;
   if (message.type === 'audio' || message.type === 'voice') {
     const heard = await media.transcribe(message, { language: conversation.language });
@@ -149,6 +151,13 @@ const handleMessage = async (message, waId, customerName) => {
 
   const input = id || (isText ? text : null);
   if (!input) return;
+
+  // Someone asking for a job: the bot answers the job steps (Iqama, then details), not the customer booking chat
+  if (await jobs.handleReply(phone, input)) return;
+  if (isText && !conversation.bookingDraft?.step && jobs.isJobRequest(text)) {
+    await jobs.start(phone, { isAr: conversation.language === 'ar' || /[\u0600-\u06FF]/.test(text), customerName: conversation.customerName });
+    return;
+  }
 
   // A menu/language tap always wins (it also abandons a half-finished booking chat); otherwise a booking chat in
   // progress owns the reply, then the front door, then the AI.
@@ -198,6 +207,13 @@ const handleInterruption = async (phone, text, conversation) => {
   if (openStep && faq.isGreeting(norm)) {
     await bookingFlow.clearDraft(phone);
     return menu.handle(phone, text, { ...conversation, bookingDraft: undefined });
+  }
+  // The service is chosen and the customer now describes the fault ("the AC is not cooling and makes noise"): that is for
+  // the technician. Keep it on the booking, say so, and point back to the open question, without sending the list again.
+  if ((openStep === 'date' || openStep === 'time') && !/[?؟]/.test(text) && !bookingFlow.looksLikeAnswer(openStep, text)
+    && (tokens.length >= 3 || faq.PROBLEM_RE.test(`${text} ${norm}`))) {
+    await bookingFlow.addProblemNote(phone, conversation.bookingDraft, text, isAr);
+    return true;
   }
   // Anything that is not an answer to the question that is open and is more than one word is a conversation: the AI
   // answers, then the booking question is asked again. (One odd word just gets the question repeated.)
